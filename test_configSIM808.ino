@@ -5,6 +5,8 @@
 #include <SimpleTimer.h>
 #define rxPin 2
 #define txPin 3
+#define CTRL(x) (#x[0]-'a'+1)
+
 SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 //DFRobot_SIM808 sim808(&GPRS);
 SimpleTimer timer;
@@ -27,6 +29,7 @@ String dateTime;
 String tiff;
 String Speed;
 String course;
+//char data2db[]="410.869,111.222\032\032";
 char data2db[]="410.869,111.222";
 byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
 //my variables MKY
@@ -36,8 +39,8 @@ boolean matchLocationMessage = true;
 String content = "";
 char character;
 char bufferTCP[10];
-char bufferSerial[BUFFER_SIZE];  // CREATE THIS BUFFER IN ORDER TO READ SERIAL AT ONCE
-char infoLocation[BUFFER_SIZE];  
+//T char bufferSerial[BUFFER_SIZE];  // CREATE THIS BUFFER IN ORDER TO READ SERIAL AT ONCE
+//T1 char infoLocation[BUFFER_SIZE];  
 char buffer[20];                 // WHAT WE ARE READING INTO
 int posTemp;
 int posBuf;
@@ -103,8 +106,8 @@ void setup()
   power();                     // power on the sim808 or power down the sim808  
 
   Serial.println("reseting");
-  delay(60000);
-
+  //T delay(60000);
+  delay(10000);
   /******************************************************
    * GPS Configuration
    ******************************************************/
@@ -222,6 +225,8 @@ void power(void)
  * variables and finally print the information at Serial interface for debugging.
  ****************************************************************************************/
 void GetGPSLocation(){
+char infoLocation[BUFFER_SIZE];  
+  
   while(GPRS.available()){
     GPRS.read();
   } 
@@ -247,12 +252,10 @@ void GetGPSLocation(){
    //Serial.println(i);
 
    //Copy buffered information in GPRS serial port and the last position of array.
-   strcpy(bufferSerial,infoLocation);
+   //T strcpy(bufferSerial,infoLocation);
    posTemp = posBuf;
-   resetInfoLocationBuffer(); //clean the just received data in the GPRS buffer
+   //T resetInfoLocationBuffer(); //clean the just received data in the GPRS buffer
 
-   //Serial.print("Buffer state after CGPSINF=0 : ");
-   //Serial.println(bufferSerial);
 
    //exit condition for parse the GPS location
    matchLocationMessage = true;
@@ -260,7 +263,8 @@ void GetGPSLocation(){
    //parse each character of buffer to extract GPS information
    for(int i =0; i<posTemp; i++){
     if(matchLocationMessage==true){
-      GPSAnalyzer(bufferSerial[i]);
+      //T GPSAnalyzer(bufferSerial[i]);
+      GPSAnalyzer(infoLocation[i]);
     }
    }
 
@@ -276,11 +280,11 @@ void resetBuffer()
   pos = 0;
 }//BASICALLY TO RESET THE BUFFER
 
-void resetInfoLocationBuffer() 
+/*void resetInfoLocationBuffer() 
 {
   memset(infoLocation, 0, sizeof(buffer));
   posBuf = 0;
-}//BASICALLY TO RESET THE BUFFER
+}//BASICALLY TO RESET THE BUFFER*/
 
 void PrintSecondsElapsed(){
   Serial.print("******************Seconds : ");
@@ -300,35 +304,60 @@ void SendGPSLocation(){
     
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
-  if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
+/*  if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CDNSGIP => FAIL");    
-  }else Serial.println("AT+CDNSGIP => OK");  
-  
+  }else Serial.println("AT+CDNSGIP => OK"); */ 
+  delay(3000);
   //GPRS.println("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789");
   if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIPSTART => FAIL");    
   }else Serial.println("AT+CIPSTART => OK");
+
+  delay(3000);
     
   //Send data to remote connection
   //GPRS.println("AT+CIPSEND"); 
-  if(!sim808_check_with_cmd("AT+CIPSEND\r\n","\>\r\n",CMD)){  
+  /*if(!sim808_check_with_cmd("AT+CIPSEND\r\n","\>",CMD)){  
     Serial.println("AT+CIPSEND => FAIL");    
   }else Serial.println("AT+CIPSEND => OK");  
 
-  GPRS.write(data2db);
+  delay(1000);
+  GPRS.write(data2db); 
   //sim808_send_cmd(data2db);
   //Equivalent to sending Ctrl+Z
   //GPRS.write(char(26)); 
   //delay(3000);
-  delay(500);
-  sim808_send_End_Mark();
+  //delay(500);
+  sim808_send_End_Mark(); */
   /*if(!sim808_wait_for_resp("OK\r\n", CMD)){  
     Serial.println("AT+CIPSEND EndMark => FAIL");    
   }else Serial.println("AT+CIPSEND EndMark => OK");  */
+
+  if(!SendDataCIPSEND(data2db,sizeof(data2db))){
+    Serial.println("CIPSEND => FAIL");
+  }
+  else{
+    Serial.println("CIPSEND => OK");
+  }
+
+  delay(3000);
+
+
+  if (!CheckConnectionStatus()) {
+    Serial.println("Uno was not connected to Server");
+  }
+  else{
+    sim808_check_with_cmd("AT+CIPCLOSE\r\n", "CLOSE OK\r\n", CMD);
+    Serial.println("Uno was disconnected from Server");
+  }
+  delay(1000);
   
   //Close remote connection
-  /*GPRS.println("AT+CIPCLOSE");
-  if(!sim808_check_with_cmd("AT+CIPCLOSE\r\n","\>\r\n",CMD)){  
+  //GPRS.println("AT+CIPCLOSE\r\n");
+  
+
+  
+  /*if(!sim808_check_with_cmd("AT+CIPCLOSE\r\n","\OK\r\n",CMD)){  
     Serial.println("AT+CIPCLOSE => FAIL");    
   }else Serial.print("AT+CIPCLOSE => OK");    */
   
@@ -379,9 +408,44 @@ void SendGPSLocation(){
  
 }
 
+int SendDataCIPSEND(const char * str, int len)
+{
+char num[4];
+if(len > 0){
+  sim808_send_cmd("AT+CIPSEND=");
+  itoa(len, num, 10);
+  sim808_send_cmd(num);
+  if(!sim808_check_with_cmd("\r\n","\>",CMD)) {
+    return 0;
+  }
+  /*if(0 != sim808_check_with_cmd(str,"SEND OK\r\n", DEFAULT_TIMEOUT * 10 ,DATA)) {
+        return 0;
+  }*/
+  delay(500);
+  sim808_send_cmd(str);
+  delay(500);
+  sim808_send_End_Mark();
+  if(!sim808_wait_for_resp("SEND OK\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
+      return 0;
+  }        
+}
+return len;
+}
 
-
-
+bool CheckConnectionStatus(void)
+{
+    char resp[96];
+    sim808_send_cmd("AT+CIPSTATUS\r\n");
+    sim808_read_buffer(resp,sizeof(resp),DEFAULT_TIMEOUT);
+    if(NULL != strstr(resp,"CONNECTED")) {
+        //+CIPSTATUS: 1,0,"TCP","216.52.233.120","80","CONNECTED"
+        return true;
+    } else {
+        //+CIPSTATUS: 1,0,"TCP","216.52.233.120","80","CLOSED"
+        //+CIPSTATUS: 0,,"","","","INITIAL"
+        return false;
+    }
+}
 
 // =====================================================================
 // Analyze the Serial information received after request the information
