@@ -5,18 +5,19 @@
 #include <SimpleTimer.h>
 #define rxPin 2
 #define txPin 3
-#define CTRL(x) (#x[0]-'a'+1)
+//#define CTRL(x) (#x[0]-'a'+1)
 
 SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 //DFRobot_SIM808 sim808(&GPRS);
 SimpleTimer timer;
 
-static String sendersnumber;
 char* key;
 String gpsMode;
-String latitude;
+//String latitude;
+char latitude[11];
 String north_south;
-String longitude;
+//String longitude;
+char longitude[11];
 String east_west;
 String positionFix;
 String numSatelite;
@@ -26,15 +27,12 @@ String altitudeUnit;
 String geoid;
 String geoid_unit;
 String dateTime;
-String tiff;
-String Speed;
-String course;
-//char data2db[]="410.869,111.222\032\032";
-char data2db[]="410.869,111.222";
+
+
 byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
 //my variables MKY
 //const int BUFFER_SIZE = 110;
-const int BUFFER_SIZE = 110;
+const int BUFFER_SIZE = 80;
 boolean matchLocationMessage = true;
 String content = "";
 char character;
@@ -64,19 +62,8 @@ enum _parseState
   PS_READ_GEOID_SEPARATION,
   PS_READ_GEOID_UNIT,
   PS_READ_TTFF,
-  PS_READ_SPEED,
-  PS_READ_COURSE,
   PS_DETECT_MSG_TYPE,
-  PS_IGNORING_COMMAND_ECHO,
-  PS_READ_CMTI_STORAGE_TYPE,
-  PS_READ_CMTI_ID,  
-  PS_READ_CMGR_DATE,
-  PS_READ_GPS_STATUS, 
-  PS_DETECT_MSG_TYPE2,
-  PS_IGNORING_COMMAND_ECHO2,
-  PS_READ_CMGR_CONTENT,
-  PS_READ_CMGR_NUMBER,
-  PS_READ_CMGR_SOMETHING
+  PS_DETECT_MSG_TYPE2
 };
 byte state =  PS_DETECT_NEW_LINE; //PS_DETECT_MSG_TYPE;   
 
@@ -166,9 +153,6 @@ void setup()
   
  
   //GPS configuration
-  GPRS.println("AT");
-  delay(50);
-  
   GPRS.println("AT+CGPSPWR=1");  //POWER ON of GPS interface
   //SerialSim808_Read();
   delay(50);
@@ -180,8 +164,6 @@ void setup()
   GPRS.println("AT+CGPSSTATUS?");
   // SerialSim808_Read();
   delay(50);
-
-
 
   //GPRS.println("AT+CGPSINF=0");  
   //SerialSim808_Read();
@@ -200,11 +182,11 @@ void loop()
    timer.run();
 
 //Only for debug purpose, send directly the AT command manually via serial interface
-   if(GPRS.available())
+   /*if(GPRS.available())
       Serial.write(GPRS.read());
    if(Serial.available())
       GPRS.write(Serial.read());
-
+   */
 }
 
 
@@ -292,9 +274,15 @@ void PrintSecondsElapsed(){
   seconds++;
 } 
 
+/******************************************************************************************
+ * SendGPSLocation()
+ * This procedure open a GPRS data connection and send latitude and longitude for server.
+ * After data is sent it disconnect from server.
+ ******************************************************************************************/
 
-void SendGPSLocation(){
-
+void SendGPSLocation(){  
+  //char data2db[]="410.869,111.222";
+  char data2db[20];
   //start a connection to TCP to URL and port 
   //get the local ip number
   //GPRS.println("AT+CIFSR");
@@ -307,7 +295,7 @@ void SendGPSLocation(){
 /*  if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CDNSGIP => FAIL");    
   }else Serial.println("AT+CDNSGIP => OK"); */ 
-  delay(3000);
+  //delay(3000);
   //GPRS.println("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789");
   if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIPSTART => FAIL");    
@@ -333,7 +321,22 @@ void SendGPSLocation(){
     Serial.println("AT+CIPSEND EndMark => FAIL");    
   }else Serial.println("AT+CIPSEND EndMark => OK");  */
 
+  //data2db=latitude;
+
+
+  memset(data2db,'\0',sizeof(data2db));
+  strcpy(data2db,latitude);
+  Serial.print("valor data2db1");
+  Serial.println(data2db);
+
+  
+  strcat(data2db,",");
+  strcat(data2db,longitude);
+  Serial.print("valor data2db2");
+  Serial.println(data2db);
+  
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
+  //if(!SendDataCIPSEND(latitude,sizeof(data2db))){ 
     Serial.println("CIPSEND => FAIL");
   }
   else{
@@ -352,61 +355,13 @@ void SendGPSLocation(){
   }
   delay(1000);
   
-  //Close remote connection
-  //GPRS.println("AT+CIPCLOSE\r\n");
-  
-
-  
-  /*if(!sim808_check_with_cmd("AT+CIPCLOSE\r\n","\OK\r\n",CMD)){  
-    Serial.println("AT+CIPCLOSE => FAIL");    
-  }else Serial.print("AT+CIPCLOSE => OK");    */
-  
-
-
-/*    //************ Successful DHCP ****************
-  Serial.print("IP Address is ");
-  Serial.println(sim808.getIPAddress());
-
-  //*********** Establish a TCP connection ************
-  if(!sim808.connect(TCP,"ardugps.hopto.org", 6789)) {
-      Serial.println("Connect error");
-  }else{
-      Serial.println("Connect mbed.org success");
-  }
-  //*********** Send a GET request *****************
-
-  
-  /*strcat(data2db,latitude);
-  strcat(data2db,",");
-  strcat(data2db,longitude);
-  */
-  
-
-  
- /* Serial.println("waiting to fetch...");
-  sim808.send(data2db, sizeof(data2db)-1);
-  /*while (true) {
-      int ret = sim808.recv(bufferTCP, sizeof(bufferTCP)-1);
-      if (ret <= 0){
-          Serial.println("fetch over...");
-          break; 
-      }
-      bufferTCP[ret] = '\0';
-      Serial.print("Recv: ");
-      Serial.print(ret);
-      Serial.print(" bytes: ");
-      Serial.println(bufferTCP);
-      break;
-  }*/
-  /*delay(10);
-
-  //************* Close TCP or UDP connections **********
-  sim808.close();
-
-  //*** Disconnect wireless connection, Close Moving Scene *******
-  //sim808.disconnect();  */
  
 }
+
+/*************************************************************************************
+ * SendDataCIPSEND()
+ * This procedure send data through the wireless connection server.
+ *************************************************************************************/
 
 int SendDataCIPSEND(const char * str, int len)
 {
@@ -432,6 +387,10 @@ if(len > 0){
 return len;
 }
 
+/***************************************************************************************
+ * CheckConnectionStatus()
+ * This procedure check if TCP connection via GPRS is active or not.
+ ***************************************************************************************/
 bool CheckConnectionStatus(void)
 {
     char resp[96];
@@ -560,9 +519,10 @@ void GPSAnalyzer(byte b) {
       else {
       
         if ( b == ',' ) {
+          strcpy(latitude,buffer);
           Serial.print("LATITUDE       : ");
-          Serial.println(buffer);
-          latitude=buffer;
+          Serial.println(latitude);
+                    
           state = PS_READ_NORTH_SOUTH;
           resetBuffer();
         }
@@ -596,9 +556,10 @@ void GPSAnalyzer(byte b) {
       }
       else {  
         if ( b == ',' ) {
+          strcpy(longitude,buffer);
           Serial.print("LONGITUDE      : ");
-          Serial.println(buffer);
-          longitude=buffer;
+          Serial.println(longitude);
+          
          
   
           state = PS_READ_EAST_WEST;
