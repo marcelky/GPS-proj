@@ -1,8 +1,8 @@
 #define DEBUG 1
 //#include <DFRobot_sim808.h>
 #include <sim808.h>
-//#include <SoftwareSerial.h>
-//#include <string.h>
+#include <SoftwareSerial.h>
+#include <string.h>
 #include <SimpleTimer.h>
 #define rxPin 2
 #define txPin 3
@@ -12,21 +12,23 @@ SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 //DFRobot_SIM808 sim808(&GPRS);
 SimpleTimer timer;
 
+
 char* key;
-char dateTime[11];
-char gpsMode[4];
-char latitude[11];
-char north_south[2];
-char longitude[11];
-char east_west[2];
-char positionFix[2];
+//All this char variable have reserved one extra char to insert \0 at end
+char gpsMode[4]="000";
+char dateTime[11]="000000.000";
+char latitude[10]="0000.0000";
+char north_south[2]="N";
+char longitude[11]="00000.00000";
+char east_west[2]="W";
+/*char positionFix[2];
 char numSatelite[2];
 char hdop[5];
 char altitude[5];
 char altitudeUnit[1];
 char geoid[3];
 char geoid_unit[1];
-
+*/
 
 
 byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
@@ -98,31 +100,35 @@ void setup()
   if(!sim808_check_with_cmd("AT+IPR=9600\r\n","OK\r\n",CMD)){  
     Serial.println("AT+IPR=9600 => FAIL");    
   }else Serial.println("AT+IPR=9600 => OK");
+  delay(50);
   
   //Set the APN id to connect to gprs network
   //GPRS.println("AT+CSTT=\"UNINET\"");
   if(!sim808_check_with_cmd("AT+CSTT=\"UNINET\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+IPR => FAIL");    
   }else Serial.println("AT+IPR => OK");
+  delay(50);
     
   //bring up the wireless connection
   //GPRS.println("AT+CIICR");
   if(!sim808_check_with_cmd("AT+CIICR\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIICR => FAIL");    
   }else Serial.println("AT+CIICR => OK");
+  delay(50);
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
   if(!sim808_check_with_cmd("AT+CIFSR\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIFSR => FAIL");    
   }else Serial.println("AT+CIFSR => OK");
+  delay(50);
     
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
   if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CDNSGIP => FAIL");    
   }else Serial.println("AT+CDNSGIP => OK");  
-  
+  delay(50);
  
   //GPS configuration
   GPRS.println("AT+CGPSPWR=1");  //POWER ON of GPS interface
@@ -137,11 +143,9 @@ void setup()
   // SerialSim808_Read();
   delay(50);
 
-  //GPRS.println("AT+CGPSINF=0");  
-  //SerialSim808_Read();
-
+  
   timer.setInterval(60000, GetGPSLocation);
-  //timer.setInterval(1000, PrintSecondsElapsed);
+  timer.setInterval(1000, PrintSecondsElapsed);
 }
 
 
@@ -152,6 +156,8 @@ void setup()
 void loop()
 {
   timer.run();
+  //Serial.print(".");
+  //delay(1000);
 
   //Only for debug purpose, send directly the AT command manually via serial interface
   #ifdef DEBUG
@@ -194,7 +200,8 @@ void power(void)
  ****************************************************************************************/
 void GetGPSLocation(){
 char infoLocation[BUFFER_SIZE];  
-
+posBuf=0;
+int i = 0;
   while(GPRS.available()){
     GPRS.read();
   } 
@@ -203,10 +210,9 @@ char infoLocation[BUFFER_SIZE];
    //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
    //otherwise it may lose some bytes 
    //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
-   //delay(50);
+   delay(50);
    
-   posBuf=0;
-   int i = 0;
+
    //for(int i=0;i<7;i++){
    while((posBuf<=99)&&(i<15)){ 
      while((GPRS.available()>0)){
@@ -217,9 +223,7 @@ char infoLocation[BUFFER_SIZE];
      //delay(15); 
    }
 
- if (!GPSAnalyzer(infoLocation)){
-    Serial.println("Extraction of GPS data failed");
- } else Serial.println("Extraction of GPS data successfull");
+ GPSAnalyzer(infoLocation);
  
  SendGPSLocation();
 }
@@ -255,15 +259,11 @@ void PrintSecondsElapsed(){
 
 void SendGPSLocation(){  
   //char data2db[]="410.869,111.222";
-  char data2db[20];
+  char data2db[21]="0000.0000,00000.0000";
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
-  if(!sim808_check_with_cmd("AT+CIFSR\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+CIFSR => FAIL");    
-  }else Serial.println("AT+CIFSR => OK");
-  
-
+  if(!sim808_send_cmd("AT+CIFSR\r\n")){  
    
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
@@ -280,7 +280,7 @@ void SendGPSLocation(){
 
   //copy latitude and longitude to send via TCP server
   memset(data2db,'\0',sizeof(data2db));
-  strcpy(data2db,latitude);
+  strncpy(data2db,latitude,sizeof(latitude));
   strcat(data2db,",");
   strcat(data2db,longitude);
   
@@ -371,25 +371,24 @@ boolean GPSAnalyzer(char *gpsBuffer) {
 
    /* get the first token */
    Serial.println("****************Content of gpsBuffer*******************");
+   //Serial.println("valor do buffer :");
+   //Serial.println(gpsBuffer);
    
-   //Command sent
+   //Get Command sent
    token = strtok(gpsBuffer,"\n\r" );
-   if(token != NULL) {
-     Serial.print("Command sent:");   
-     Serial.println(token);     
-   }else return false;
+   if(token == NULL)  return false;
 
+   //Get "+CGPSINF:" string
    token = strtok(NULL, ":");   
-   if(token != NULL) {
-     Serial.print("Command response:");   
-     Serial.println(token);     
-   }else return false;
+   if(token == NULL)  return false;
    
-   //Get CGPSINF_MODE
+   //Get CGPSINF value
    token = strtok(NULL, ",");
-   if(token != NULL) {
+   if(token != NULL) {    
+      //strncpy(gpsMode,token,sizeof(gpsMode));
+      //gpsMode[sizeof(gpsMode)-1] = '\0';
+
       strcpy(gpsMode,token);
-      Serial.println("************************************************************ ");        
       Serial.print("CGPSINF_MODE    : ");
       Serial.println(gpsMode);   
    }else return false;
@@ -398,355 +397,54 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    //Get time    
    token = strtok(NULL, ",");
    if(token != NULL) {
-      strcpy(dateTime,token);
+      strncpy(dateTime,token,sizeof(dateTime));
+      dateTime[sizeof(dateTime)-1] = '\0';        
       Serial.print("TIME            : ");
-      Serial.println(dateTime);        
+      Serial.println(dateTime); 
+            
    }else return false;
 
    //Get Latitude
    token = strtok(NULL, ",");
    if(token != NULL) {
-      strcpy(latitude,token);
+      strncpy(latitude,token,sizeof(latitude));
+      latitude[sizeof(latitude)-1] = '\0';      
       Serial.print("LATITUDE        : ");
       Serial.println(latitude);      
    }else return false;   
 
    //Get North or South
    token = strtok(NULL, ",");
-   if(token != NULL) {
-      strcpy(north_south,token);
+   if(token != NULL) {     
+      strncpy(north_south,token,sizeof(north_south));
+      north_south[sizeof(north_south)-1] = '\0';     
       Serial.print("N/S INDICATOR  : ");
-      Serial.println(north_south);      
+      Serial.println(north_south);  
+         
    }else return false;   
 
    //Get Longitude
    token = strtok(NULL, ",");
-   if(token != NULL) {
-      strcpy(longitude,token);
+   if(token != NULL) {    
+      strncpy(longitude,token,sizeof(longitude));
+      longitude[sizeof(longitude)-1] = '\0';   
       Serial.print("LONGITUDE       : ");
-      Serial.println(longitude);      
+      Serial.println(longitude);
+      
    }else return false;  
 
    //Get East or West
    token = strtok(NULL, ",");
    if(token != NULL) {
-      strcpy(east_west,token);
+      strncpy(east_west,token,sizeof(east_west));
+      east_west[sizeof(east_west)-1] = '\0';      
       Serial.print("E/W INDICATOR   : ");
       Serial.println(east_west);    
       Serial.println("************************************************************ ");  
         
-   }else return false;  
+   }else return false; 
 
    return true;     
-
-/*   if ((b != ',')){
-       buffer[pos++] = b;
-   }
-   
-   if ( pos >= sizeof(buffer) )
-    resetBuffer();// just to be safe
-    
-   //Serial.println(buffer);
-   //Serial.println(state);
-  
-  switch (state) 
-  {
-  case PS_DETECT_NEW_LINE:
-  {
-    //if(b == '\n'){
-    if(b == '+'){  
-      resetBuffer();
-      state = PS_DETECT_MSG_TYPE2;
-    }
-  }
-  break;
-    
-  case PS_DETECT_MSG_TYPE2: 
-    {
-      if ((b == '\n'))
-        resetBuffer();
-      else {        
-        if ( pos == 8 ) {
-          //Serial.print("Checking message type: ");
-          if ( strcmp(buffer, "UGNSINF:") ) {
-            //Serial.println("Received CGNSINF:");            
-            state = PS_READ_GPS_MODE;
-            resetBuffer();
-          }
-          else{
-            resetBuffer();
-            state = PS_DETECT_NEW_LINE;
-            matchLocationMessage = false;
-          }
-        }
-      }
-    }
-    break;
-
-//THIS WOULD READ FROM +CGNSINF: (TO THE COMMA),
-  case PS_READ_GPS_MODE:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {
-        if ( b == ',' ) {
-          strcpy(gpsMode,buffer);
-          Serial.println("************************************************************ ");        
-          Serial.print("CGPSINF_MODE   : ");
-          Serial.println(gpsMode);
-          
-          //state = PS_READ_LONGITUDE;
-          state = PS_READ_TIME;
-          resetBuffer();
-        }
-      }
-    }
-    break;
-
-  case PS_READ_TIME:
-  {
-    if ( b== '\n'){
-      state = PS_DETECT_NEW_LINE;
-      resetBuffer();
-    }
-    else {
-      if ( b == ',' ) {
-        strcpy(dateTime,buffer);
-        Serial.print("TIME           : ");
-        Serial.println(dateTime);       
-        
-        state = PS_READ_LATITUDE;
-        resetBuffer();
-      }
-    }
-  }
-  break; 
-   
-  case PS_READ_LATITUDE:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {
-      
-        if ( b == ',' ) {
-          strcpy(latitude,buffer);
-          Serial.print("LATITUDE       : ");
-          Serial.println(latitude);
-                    
-          state = PS_READ_NORTH_SOUTH;
-          resetBuffer();
-        }
-      }
-    }
-  break; 
-
-  case PS_READ_NORTH_SOUTH:
-  {
-    if ( b== '\n'){
-      state = PS_DETECT_NEW_LINE;
-      resetBuffer();
-    }
-    else {
-      if ( b == ',' ) {
-        strcpy(north_south,buffer);
-        Serial.print("N/S indicator  : ");
-        Serial.println(north_south);        
-        state = PS_READ_LONGITUDE;
-        resetBuffer();
-      }
-    }
-  }
-  break; 
-
-  case PS_READ_LONGITUDE:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {  
-        if ( b == ',' ) {
-          strcpy(longitude,buffer);
-          Serial.print("LONGITUDE      : ");
-          Serial.println(longitude);
-          
-         
-  
-          state = PS_READ_EAST_WEST;
-          resetBuffer();
-        }
-      }
-    }
-    break;
-
-
-
-  case PS_READ_EAST_WEST:
-  {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {
-        if ( b == ',' ) {
-          strcpy(east_west,buffer);
-          Serial.print("E/W indicator  : ");
-          Serial.println(east_west);
-
-          state = PS_READ_POSITION_FIX;
-          resetBuffer();
-        }
-      }
-    }
-    break;
-
-
-
-   case PS_READ_POSITION_FIX:
-   {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {
-        if ( b == ',' ) {
-          strcpy(positionFix,buffer); 
-          Serial.print("POSITION FIX   : ");
-          Serial.println(positionFix);
-          state = PS_READ_NUM_SAT;
-          resetBuffer();
-          //delay(500); don't do this!
-        }
-      }
-    }
-    break;
-
-    case PS_READ_NUM_SAT:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(numSatelite,buffer);
-          Serial.print("NUM SATELLITE  : ");
-          Serial.println(numSatelite);
-
-          state =PS_READ_HDOP;
-          resetBuffer();
-  
-        }
-      }
-    }
-    break;
-
-    case PS_READ_HDOP:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(hdop,buffer);
-          Serial.print("HDOP           : ");
-          Serial.println(hdop);
-          state =PS_READ_ALTITUDE;
-          resetBuffer();
-  
-        }
-      }
-    }
-    break;
-
-    case PS_READ_ALTITUDE:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(altitude,buffer);
-          Serial.print("ALTITUDE       : ");
-          Serial.println(altitude);
-
-          state =PS_READ_ALT_UNIT;
-          resetBuffer();
-  
-        }
-      }
-    }
-    break;
-    
-    case PS_READ_ALT_UNIT:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(altitudeUnit,buffer);
-          Serial.print("ALTITUDE unit  : ");
-          Serial.println(altitudeUnit);
-          state =PS_READ_GEOID_SEPARATION;
-          resetBuffer();
-  
-        }
-      }
-    }
-    break;
-
-    case PS_READ_GEOID_SEPARATION:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(geoid,buffer);
-          Serial.print("GEOID SEP.     : ");
-          Serial.println(geoid);
-
-          state =PS_READ_GEOID_UNIT;
-          resetBuffer();
-  
-        }
-      }
-    }
-    break;
-
-
-    case PS_READ_GEOID_UNIT:
-    {
-      if ( b== '\n'){
-        state = PS_DETECT_NEW_LINE;
-        resetBuffer();
-      }
-      else {   
-       if ( b == ',' ) {
-          strcpy(geoid_unit,buffer);
-          Serial.print("GEOID SEP. unit: ");
-          Serial.println(geoid_unit);
-          state =PS_DETECT_NEW_LINE;
-          resetBuffer();
-          matchLocationMessage = false;
-  
-        }
-      }
-    }
-    break;
-  
-  //use goto to put it at sms begining
-  }
-  //return;*/
- }  
+}  
 
 
