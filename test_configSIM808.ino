@@ -1,42 +1,41 @@
-#include <DFRobot_sim808.h>
+#define DEBUG 1
+//#include <DFRobot_sim808.h>
 #include <sim808.h>
-#include <SoftwareSerial.h>
-#include <string.h>
+//#include <SoftwareSerial.h>
+//#include <string.h>
 #include <SimpleTimer.h>
 #define rxPin 2
 #define txPin 3
-//#define CTRL(x) (#x[0]-'a'+1)
+
 
 SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 //DFRobot_SIM808 sim808(&GPRS);
 SimpleTimer timer;
 
 char* key;
-String gpsMode;
-//String latitude;
+char dateTime[10];
+char gpsMode[3];
 char latitude[11];
-String north_south;
-//String longitude;
+char north_south[1];
 char longitude[11];
-String east_west;
-String positionFix;
-String numSatelite;
-String hdop;
-String altitude;
-String altitudeUnit;
-String geoid;
-String geoid_unit;
-String dateTime;
+char east_west[1];
+char positionFix[2];
+char numSatelite[2];
+char hdop[5];
+char altitude[5];
+char altitudeUnit[1];
+char geoid[3];
+char geoid_unit[1];
+
 
 
 byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
 //my variables MKY
 //const int BUFFER_SIZE = 110;
-const int BUFFER_SIZE = 80;
+const int BUFFER_SIZE = 90;
 boolean matchLocationMessage = true;
 String content = "";
-char character;
-char bufferTCP[10];
+//char character;
 //T char bufferSerial[BUFFER_SIZE];  // CREATE THIS BUFFER IN ORDER TO READ SERIAL AT ONCE
 //T1 char infoLocation[BUFFER_SIZE];  
 char buffer[20];                 // WHAT WE ARE READING INTO
@@ -179,14 +178,15 @@ void setup()
  *******************************************************************************************/
 void loop()
 {
-   timer.run();
+  timer.run();
 
-//Only for debug purpose, send directly the AT command manually via serial interface
-   /*if(GPRS.available())
+  //Only for debug purpose, send directly the AT command manually via serial interface
+  #ifdef DEBUG
+  if(GPRS.available())
       Serial.write(GPRS.read());
    if(Serial.available())
       GPRS.write(Serial.read());
-   */
+  #endif
 }
 
 
@@ -202,13 +202,27 @@ void power(void)
 }
 
 /****************************************************************************************
+ * powerGPS(int onOff)
+ * This procedure power on GPS 1, power on and 0 power off.
+ ****************************************************************************************/
+/*boolean powerGPS(int onOff){
+  if (onOff == 1) 
+    if(!sim808_check_with_cmd("AT+CGNSPWR=1\r\n", "OK\r\n", CMD)) return false;
+  else 
+    if(!sim808_check_with_cmd("AT+CGNSPWR=0\r\n", "OK\r\n", CMD)) return false;
+
+  return true;
+}*/
+ 
+/****************************************************************************************
  * GetGPSLocation()
  * This function request the GPS information from SIM808, parse information in global 
  * variables and finally print the information at Serial interface for debugging.
  ****************************************************************************************/
 void GetGPSLocation(){
 char infoLocation[BUFFER_SIZE];  
-  
+
+ 
   while(GPRS.available()){
     GPRS.read();
   } 
@@ -230,6 +244,8 @@ char infoLocation[BUFFER_SIZE];
      i++;
      //delay(15); 
    }
+
+   //powerGPS(0);
    //Serial.print("valor i= ");
    //Serial.println(i);
 
@@ -278,85 +294,56 @@ void PrintSecondsElapsed(){
  * SendGPSLocation()
  * This procedure open a GPRS data connection and send latitude and longitude for server.
  * After data is sent it disconnect from server.
+ * Send data to server using format "latitude,longitude" = "llll.llll,lllll.llll"
+ * obs. no \0 at end like string.
  ******************************************************************************************/
 
 void SendGPSLocation(){  
   //char data2db[]="410.869,111.222";
   char data2db[20];
-  //start a connection to TCP to URL and port 
+    
   //get the local ip number
   //GPRS.println("AT+CIFSR");
   if(!sim808_check_with_cmd("AT+CIFSR\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIFSR => FAIL");    
   }else Serial.println("AT+CIFSR => OK");
-    
+  
+
+   
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
-/*  if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
+  if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CDNSGIP => FAIL");    
-  }else Serial.println("AT+CDNSGIP => OK"); */ 
-  //delay(3000);
-  //GPRS.println("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789");
+  }else Serial.println("AT+CDNSGIP => OK");  
+  delay(5000);
+  
+  //start a connection to TCP to URL and port 
   if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIPSTART => FAIL");    
   }else Serial.println("AT+CIPSTART => OK");
+  delay(5000);
 
-  delay(3000);
-    
-  //Send data to remote connection
-  //GPRS.println("AT+CIPSEND"); 
-  /*if(!sim808_check_with_cmd("AT+CIPSEND\r\n","\>",CMD)){  
-    Serial.println("AT+CIPSEND => FAIL");    
-  }else Serial.println("AT+CIPSEND => OK");  
-
-  delay(1000);
-  GPRS.write(data2db); 
-  //sim808_send_cmd(data2db);
-  //Equivalent to sending Ctrl+Z
-  //GPRS.write(char(26)); 
-  //delay(3000);
-  //delay(500);
-  sim808_send_End_Mark(); */
-  /*if(!sim808_wait_for_resp("OK\r\n", CMD)){  
-    Serial.println("AT+CIPSEND EndMark => FAIL");    
-  }else Serial.println("AT+CIPSEND EndMark => OK");  */
-
-  //data2db=latitude;
-
-
+  //copy latitude and longitude to send via TCP server
   memset(data2db,'\0',sizeof(data2db));
   strcpy(data2db,latitude);
-  Serial.print("valor data2db1");
-  Serial.println(data2db);
-
-  
   strcat(data2db,",");
   strcat(data2db,longitude);
-  Serial.print("valor data2db2");
-  Serial.println(data2db);
   
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-  //if(!SendDataCIPSEND(latitude,sizeof(data2db))){ 
     Serial.println("CIPSEND => FAIL");
-  }
-  else{
-    Serial.println("CIPSEND => OK");
-  }
-
-  delay(3000);
-
+  } else Serial.println("CIPSEND => OK");
+  delay(5000);
 
   if (!CheckConnectionStatus()) {
     Serial.println("Uno was not connected to Server");
   }
   else{
     sim808_check_with_cmd("AT+CIPCLOSE\r\n", "CLOSE OK\r\n", CMD);
-    Serial.println("Uno was disconnected from Server");
+    Serial.println("Uno execute disconnection from Server");
   }
-  delay(1000);
-  
- 
-}
+  delay(3000);
+
+}//end procedure
 
 /*************************************************************************************
  * SendDataCIPSEND()
@@ -393,17 +380,14 @@ return len;
  ***************************************************************************************/
 bool CheckConnectionStatus(void)
 {
-    char resp[96];
-    sim808_send_cmd("AT+CIPSTATUS\r\n");
-    sim808_read_buffer(resp,sizeof(resp),DEFAULT_TIMEOUT);
-    if(NULL != strstr(resp,"CONNECTED")) {
-        //+CIPSTATUS: 1,0,"TCP","216.52.233.120","80","CONNECTED"
-        return true;
-    } else {
-        //+CIPSTATUS: 1,0,"TCP","216.52.233.120","80","CLOSED"
-        //+CIPSTATUS: 0,,"","","","INITIAL"
-        return false;
-    }
+  char resp[96];
+  sim808_send_cmd("AT+CIPSTATUS\r\n");
+  sim808_read_buffer(resp,sizeof(resp),DEFAULT_TIMEOUT);
+  if(NULL != strstr(resp,"CONNECTED")) {
+      return true;
+  } else {
+      return false;
+  }
 }
 
 // =====================================================================
@@ -479,10 +463,11 @@ void GPSAnalyzer(byte b) {
       }
       else {
         if ( b == ',' ) {
+          strcpy(gpsMode,buffer);
           Serial.println("************************************************************ ");        
           Serial.print("CGPSINF_MODE   : ");
-          Serial.println(buffer);
-          gpsMode=buffer;
+          Serial.println(gpsMode);
+          
           //state = PS_READ_LONGITUDE;
           state = PS_READ_TIME;
           resetBuffer();
@@ -499,10 +484,10 @@ void GPSAnalyzer(byte b) {
     }
     else {
       if ( b == ',' ) {
+        strcpy(dateTime,buffer);
         Serial.print("TIME           : ");
-        Serial.println(buffer);
-        dateTime=buffer;
-        //state = PS_READ_TTFF;
+        Serial.println(dateTime);       
+        
         state = PS_READ_LATITUDE;
         resetBuffer();
       }
@@ -538,9 +523,9 @@ void GPSAnalyzer(byte b) {
     }
     else {
       if ( b == ',' ) {
+        strcpy(north_south,buffer);
         Serial.print("N/S indicator  : ");
-        Serial.println(buffer);
-        north_south=buffer;
+        Serial.println(north_south);        
         state = PS_READ_LONGITUDE;
         resetBuffer();
       }
@@ -579,9 +564,10 @@ void GPSAnalyzer(byte b) {
       }
       else {
         if ( b == ',' ) {
+          strcpy(east_west,buffer);
           Serial.print("E/W indicator  : ");
-          Serial.println(buffer);
-          east_west=buffer;
+          Serial.println(east_west);
+
           state = PS_READ_POSITION_FIX;
           resetBuffer();
         }
@@ -599,9 +585,9 @@ void GPSAnalyzer(byte b) {
       }
       else {
         if ( b == ',' ) {
+          strcpy(positionFix,buffer); 
           Serial.print("POSITION FIX   : ");
-          Serial.println(buffer);
-          positionFix=buffer; 
+          Serial.println(positionFix);
           state = PS_READ_NUM_SAT;
           resetBuffer();
           //delay(500); don't do this!
@@ -618,9 +604,10 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(numSatelite,buffer);
           Serial.print("NUM SATELLITE  : ");
-          Serial.println(buffer);
-          numSatelite=buffer;
+          Serial.println(numSatelite);
+
           state =PS_READ_HDOP;
           resetBuffer();
   
@@ -637,9 +624,9 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(hdop,buffer);
           Serial.print("HDOP           : ");
-          Serial.println(buffer);
-          hdop=buffer;
+          Serial.println(hdop);
           state =PS_READ_ALTITUDE;
           resetBuffer();
   
@@ -656,9 +643,10 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(altitude,buffer);
           Serial.print("ALTITUDE       : ");
-          Serial.println(buffer);
-          altitude=buffer;
+          Serial.println(altitude);
+
           state =PS_READ_ALT_UNIT;
           resetBuffer();
   
@@ -675,9 +663,9 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(altitudeUnit,buffer);
           Serial.print("ALTITUDE unit  : ");
-          Serial.println(buffer);
-          altitudeUnit=buffer;
+          Serial.println(altitudeUnit);
           state =PS_READ_GEOID_SEPARATION;
           resetBuffer();
   
@@ -694,9 +682,10 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(geoid,buffer);
           Serial.print("GEOID SEP.     : ");
-          Serial.println(buffer);
-          geoid=buffer;
+          Serial.println(geoid);
+
           state =PS_READ_GEOID_UNIT;
           resetBuffer();
   
@@ -714,9 +703,9 @@ void GPSAnalyzer(byte b) {
       }
       else {   
        if ( b == ',' ) {
+          strcpy(geoid_unit,buffer);
           Serial.print("GEOID SEP. unit: ");
-          Serial.println(buffer);
-          geoid_unit=buffer;
+          Serial.println(geoid_unit);
           state =PS_DETECT_NEW_LINE;
           resetBuffer();
           matchLocationMessage = false;
