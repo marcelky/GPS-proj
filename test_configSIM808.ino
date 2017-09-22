@@ -13,12 +13,12 @@ SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 SimpleTimer timer;
 
 char* key;
-char dateTime[10];
-char gpsMode[3];
+char dateTime[11];
+char gpsMode[4];
 char latitude[11];
-char north_south[1];
+char north_south[2];
 char longitude[11];
-char east_west[1];
+char east_west[2];
 char positionFix[2];
 char numSatelite[2];
 char hdop[5];
@@ -33,38 +33,11 @@ byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
 //my variables MKY
 //const int BUFFER_SIZE = 110;
 const int BUFFER_SIZE = 90;
-boolean matchLocationMessage = true;
-String content = "";
-//char character;
-//T char bufferSerial[BUFFER_SIZE];  // CREATE THIS BUFFER IN ORDER TO READ SERIAL AT ONCE
-//T1 char infoLocation[BUFFER_SIZE];  
+
 char buffer[20];                 // WHAT WE ARE READING INTO
-int posTemp;
 int posBuf;
 int seconds=0;
 int Powerkey=6;                 //Power pin for SIM808
-
-enum _parseState 
-{
-  PS_DETECT_NEW_LINE, //first byte to init sync
-  PS_READ_GPS_MODE,
-  PS_READ_TIME,  
-  PS_READ_LATITUDE,
-  PS_READ_NORTH_SOUTH,  
-  PS_READ_LONGITUDE,
-  PS_READ_EAST_WEST,
-  PS_READ_POSITION_FIX,
-  PS_READ_NUM_SAT,
-  PS_READ_HDOP,
-  PS_READ_ALTITUDE,
-  PS_READ_ALT_UNIT,
-  PS_READ_GEOID_SEPARATION,
-  PS_READ_GEOID_UNIT,
-  PS_READ_TTFF,
-  PS_DETECT_MSG_TYPE,
-  PS_DETECT_MSG_TYPE2
-};
-byte state =  PS_DETECT_NEW_LINE; //PS_DETECT_MSG_TYPE;   
 
 
 /*******************************************************************************************
@@ -222,7 +195,6 @@ void power(void)
 void GetGPSLocation(){
 char infoLocation[BUFFER_SIZE];  
 
- 
   while(GPRS.available()){
     GPRS.read();
   } 
@@ -245,39 +217,22 @@ char infoLocation[BUFFER_SIZE];
      //delay(15); 
    }
 
-   //powerGPS(0);
-   //Serial.print("valor i= ");
-   //Serial.println(i);
-
-   //Copy buffered information in GPRS serial port and the last position of array.
-   //T strcpy(bufferSerial,infoLocation);
-   posTemp = posBuf;
-   //T resetInfoLocationBuffer(); //clean the just received data in the GPRS buffer
-
-
-   //exit condition for parse the GPS location
-   matchLocationMessage = true;
-
-   //parse each character of buffer to extract GPS information
-   for(int i =0; i<posTemp; i++){
-    if(matchLocationMessage==true){
-      //T GPSAnalyzer(bufferSerial[i]);
-      GPSAnalyzer(infoLocation[i]);
-    }
-   }
-
-   SendGPSLocation();
+ if (!GPSAnalyzer(infoLocation)){
+    Serial.println("Extraction of GPS data failed");
+ } else Serial.println("Extraction of GPS data successfull");
+ 
+ SendGPSLocation();
 }
 
 
-void resetBuffer() 
+/*void resetBuffer() 
 {
   memset(buffer, 0, sizeof(buffer));
   //Serial.print("Valor do pos: ");
   //Serial.println(pos);
   pos = 0;
 }//BASICALLY TO RESET THE BUFFER
-
+*/
 /*void resetInfoLocationBuffer() 
 {
   memset(infoLocation, 0, sizeof(buffer));
@@ -390,27 +345,101 @@ bool CheckConnectionStatus(void)
   }
 }
 
-// =====================================================================
-// Analyze the Serial information received after request the information
-// AT+CCPSINF=2
-// =====================================================================
-//AT+CGPSINF=2, get GPS location with format
-//Message ID       = 2
-//UTC time         = [hhmmss.sss]
-//Latitude         = [+/-[0dd.dddd]]
-//N/S indicator    = [N/S]
-//Longitude        = [+/-[0ddd.dddd]]
-//E/W indicator    = [W/E]
-//Position fix     = 1
-//Satellites used  = range 0 to 12
-//HDOP             = x.xx
-//MSL Altitude     = xxx.x
-//Units            = M
-//Geoid Separation = xxx
-//Units            = M
-void GPSAnalyzer(byte b) {
+/********************************************************************************
+ * boolean GPSAnalyzer(char *gpsBuffer)
+ * Analyze the Serial information received after request the information 
+ * AT+CCPSINF=2
+ * +CGPSINF: 2,050656.000,0030.2706,N,00120.1007,E,1,9,0.90,51.9,M,7.0,M,,
+ * AT+CGPSINF=2, get GPS location with format
+ * Message ID       = 2
+ * UTC time         = [hhmmss.sss]
+ * Latitude         = [+/-[0dd.dddd]]
+ * N/S indicator    = [N/S]
+ * Longitude        = [+/-[0ddd.dddd]]
+ * E/W indicator    = [W/E]
+ * Position fix     = 1
+ * Satellites used  = range 0 to 12
+ * HDOP             = x.xx
+ * MSL Altitude     = xxx.x
+ * Units            = M
+ * Geoid Separation = xxx
+ * Units            = M
+ * +CGPSINF: 2,050656.000,0030.2706,N,00120.1007,E,1,9,0.90,51.9,M,7.0,M,,
+ ********************************************************************************/
+boolean GPSAnalyzer(char *gpsBuffer) {
+   char *token;
 
-   if ((b != ',')){
+   /* get the first token */
+   Serial.println("****************Content of gpsBuffer*******************");
+   
+   //Command sent
+   token = strtok(gpsBuffer,"\n\r" );
+   if(token != NULL) {
+     Serial.print("Command sent:");   
+     Serial.println(token);     
+   }else return false;
+
+   token = strtok(NULL, ":");   
+   if(token != NULL) {
+     Serial.print("Command response:");   
+     Serial.println(token);     
+   }else return false;
+   
+   //Get CGPSINF_MODE
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(gpsMode,token);
+      Serial.println("************************************************************ ");        
+      Serial.print("CGPSINF_MODE    : ");
+      Serial.println(gpsMode);   
+   }else return false;
+
+
+   //Get time    
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(dateTime,token);
+      Serial.print("TIME            : ");
+      Serial.println(dateTime);        
+   }else return false;
+
+   //Get Latitude
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(latitude,token);
+      Serial.print("LATITUDE        : ");
+      Serial.println(latitude);      
+   }else return false;   
+
+   //Get North or South
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(north_south,token);
+      Serial.print("N/S INDICATOR  : ");
+      Serial.println(north_south);      
+   }else return false;   
+
+   //Get Longitude
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(longitude,token);
+      Serial.print("LONGITUDE       : ");
+      Serial.println(longitude);      
+   }else return false;  
+
+   //Get East or West
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strcpy(east_west,token);
+      Serial.print("E/W INDICATOR   : ");
+      Serial.println(east_west);    
+      Serial.println("************************************************************ ");  
+        
+   }else return false;  
+
+   return true;     
+
+/*   if ((b != ',')){
        buffer[pos++] = b;
    }
    
@@ -717,8 +746,7 @@ void GPSAnalyzer(byte b) {
   
   //use goto to put it at sms begining
   }
-  //return;
+  //return;*/
  }  
-
 
 
