@@ -1,4 +1,12 @@
 #define DEBUG 1
+#define PROTOCOL 2 //1 = TCP and 2 = UDP
+
+#ifdef PROTOCOL
+  static int const prot = PROTOCOL;
+#else
+  static int const prot = 1;          // default value TCP
+#endif
+
 //#include <DFRobot_sim808.h>
 #include <sim808.h>
 #include <SoftwareSerial.h>
@@ -11,6 +19,12 @@
 SoftwareSerial GPRS(rxPin, txPin); // RX, TX
 //DFRobot_SIM808 sim808(&GPRS);
 SimpleTimer timer;
+
+enum Protocol {
+    CLOSED = 0,
+    TCP    = 1,
+    UDP    = 2,
+};
 
 
 char* key;
@@ -271,11 +285,22 @@ void SendGPSLocation(){
   delay(1000);
   
   //start a connection to TCP to URL and port 
-  if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
+  /*if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIPSTART => FAIL");    
   }else Serial.println("AT+CIPSTART => OK");
+  delay(1000);*/
+
+  if (prot == TCP){
+    if(!SendCIPSTART(TCP)){
+      Serial.println("AT+CIPSTART => FAIL"); 
+    } else Serial.println("AT+CIPSTART => OK");
+  }else {
+    if(!SendCIPSTART(UDP)){
+      Serial.println("AT+CIPSTART => FAIL"); 
+    } else Serial.println("AT+CIPSTART => OK");    
+  }
+  
   delay(1000);
-  //delay(50);
 
   //copy latitude and longitude to send via TCP server
   memset(data2db,'\0',sizeof(data2db));
@@ -286,17 +311,23 @@ void SendGPSLocation(){
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
     Serial.println("CIPSEND => FAIL");
     //Try to resend    
-    if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
+    /*if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
       Serial.println("AT+CIPSTART => FAIL");    
-    }else Serial.println("AT+CIPSTART => OK");
+    }else Serial.println("AT+CIPSTART => OK");*/
 
-    delay(1000);
-    if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-    Serial.println("CIPSEND =>RESEND FAIL");
-    delay(50);
-    } else Serial.println("CIPSEND => RESEND OK");
+    if(prot == TCP){
+      if(!SendCIPSTART(TCP)){
+        Serial.println("AT+CIPSTART => FAIL"); 
+      } else Serial.println("AT+CIPSTART => OK");
+  
+      delay(1000);
+      if(!SendDataCIPSEND(data2db,sizeof(data2db))){
+      Serial.println("CIPSEND =>RESEND FAIL");
+      delay(50);
+      } else Serial.println("CIPSEND => RESEND OK");
+    }    
   } else Serial.println("CIPSEND => OK");
-  //delay(5000);
+
   delay(50);
 
   if (!CheckConnectionStatus()) {
@@ -309,6 +340,35 @@ void SendGPSLocation(){
   //delay(3000);
 
 }//end procedure
+
+/*************************************************************************************
+ * SendCIPSTART()
+ *************************************************************************************/
+boolean SendCIPSTART (Protocol ptl)
+{
+  if(ptl == TCP) {
+    if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
+      return false;    
+    }
+    else{
+      return true;  
+    }
+  } 
+  else { 
+    if(ptl == UDP) {
+      if(!sim808_check_with_cmd("AT+CIPSTART=\"UDP\",\"ardugps.hopto.org\",6789\r\n","ERROR\r\n\r\nALREADY CONNECT\r\n",CMD)){  
+        return false;    
+      }
+      else {        
+        return true;
+      }
+    } 
+    else {
+      return false;
+    }
+  }
+}
+
 
 /*************************************************************************************
  * SendDataCIPSEND()
