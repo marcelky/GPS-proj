@@ -118,9 +118,7 @@ void setup()
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
-  if(!sim808_check_with_cmd("AT+CIFSR\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+CIFSR => FAIL");    
-  }else Serial.println("AT+CIFSR => OK");
+  sim808_send_cmd("AT+CIFSR\r\n");
   delay(50);
     
   //Get the remote IP address
@@ -145,7 +143,7 @@ void setup()
 
   
   timer.setInterval(60000, GetGPSLocation);
-  timer.setInterval(1000, PrintSecondsElapsed);
+  //timer.setInterval(1000, PrintSecondsElapsed);
 }
 
 
@@ -263,20 +261,21 @@ void SendGPSLocation(){
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
-  if(!sim808_send_cmd("AT+CIFSR\r\n")){  
+  sim808_send_cmd("AT+CIFSR\r\n");  
    
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
   if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CDNSGIP => FAIL");    
   }else Serial.println("AT+CDNSGIP => OK");  
-  delay(5000);
+  delay(1000);
   
   //start a connection to TCP to URL and port 
   if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
     Serial.println("AT+CIPSTART => FAIL");    
   }else Serial.println("AT+CIPSTART => OK");
-  delay(5000);
+  delay(1000);
+  //delay(50);
 
   //copy latitude and longitude to send via TCP server
   memset(data2db,'\0',sizeof(data2db));
@@ -286,17 +285,28 @@ void SendGPSLocation(){
   
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
     Serial.println("CIPSEND => FAIL");
+    //Try to resend    
+    if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
+      Serial.println("AT+CIPSTART => FAIL");    
+    }else Serial.println("AT+CIPSTART => OK");
+
+    delay(1000);
+    if(!SendDataCIPSEND(data2db,sizeof(data2db))){
+    Serial.println("CIPSEND =>RESEND FAIL");
+    delay(50);
+    } else Serial.println("CIPSEND => RESEND OK");
   } else Serial.println("CIPSEND => OK");
-  delay(5000);
+  //delay(5000);
+  delay(50);
 
   if (!CheckConnectionStatus()) {
-    Serial.println("Uno was not connected to Server");
+    Serial.println("Uno was already disconnected from Server");
   }
   else{
     sim808_check_with_cmd("AT+CIPCLOSE\r\n", "CLOSE OK\r\n", CMD);
-    Serial.println("Uno execute disconnection from Server");
+    Serial.println("Uno have disconnected from Server");
   }
-  delay(3000);
+  //delay(3000);
 
 }//end procedure
 
@@ -312,15 +322,15 @@ if(len > 0){
   sim808_send_cmd("AT+CIPSEND=");
   itoa(len, num, 10);
   sim808_send_cmd(num);
-  if(!sim808_check_with_cmd("\r\n","\>",CMD)) {
+  if(!sim808_check_with_cmd("\r\n",">",CMD)) {
     return 0;
   }
   /*if(0 != sim808_check_with_cmd(str,"SEND OK\r\n", DEFAULT_TIMEOUT * 10 ,DATA)) {
         return 0;
   }*/
-  delay(500);
+  delay(1000);
   sim808_send_cmd(str);
-  delay(500);
+  delay(1000);
   sim808_send_End_Mark();
   if(!sim808_wait_for_resp("SEND OK\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
       return 0;
