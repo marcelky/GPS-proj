@@ -35,6 +35,8 @@ char latitude[10]="0000.0000";
 char north_south[2]="N";
 char longitude[11]="00000.00000";
 char east_west[2]="W";
+char MSL_altitude[8]="00000.0";
+char Speed[8]="000.000";
 /*char positionFix[2];
 char numSatelite[2];
 char hdop[5];
@@ -49,6 +51,7 @@ byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
 //my variables MKY
 //const int BUFFER_SIZE = 110;
 const int BUFFER_SIZE = 90;
+//char infoLocation[BUFFER_SIZE];  
 
 char buffer[20];                 // WHAT WE ARE READING INTO
 int posBuf;
@@ -214,30 +217,64 @@ void GetGPSLocation(){
 char infoLocation[BUFFER_SIZE];  
 posBuf=0;
 int i = 0;
+
+  //Get position
   while(GPRS.available()){
     GPRS.read();
   } 
-   GPRS.println("AT+CGPSINF=2");
+  GPRS.println("AT+CGPSINF=2");
    
-   //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
-   //otherwise it may lose some bytes 
-   //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
-   delay(50);
+  //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
+  //otherwise it may lose some bytes 
+  //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
+  delay(50);
    
 
-   //for(int i=0;i<7;i++){
-   while((posBuf<=99)&&(i<15)){ 
-     while((GPRS.available()>0)){
-        infoLocation[posBuf++]=GPRS.read();
-     }
-     delay(10);
-     i++;
-     //delay(15); 
-   }
+  //for(int i=0;i<7;i++){
+  while((posBuf<=99)&&(i<15)){ 
+    while((GPRS.available()>0)){
+      infoLocation[posBuf++]=GPRS.read();
+    }
+    delay(10);
+    i++;
+    //delay(15); 
+  }
+  GPSAnalyzer(infoLocation);
 
- GPSAnalyzer(infoLocation);
- 
- SendGPSLocation();
+
+
+
+
+  //Get Speed
+  while(GPRS.available()){
+    GPRS.read();
+  } 
+  GPRS.println("AT+CGPSINF=32");
+   
+  //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
+  //otherwise it may lose some bytes 
+  //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
+  delay(50);
+   
+
+  posBuf=0;
+  i=0;
+  //for(int i=0;i<7;i++){
+  while((posBuf<=99)&&(i<15)){ 
+    while((GPRS.available()>0)){
+      infoLocation[posBuf++]=GPRS.read();
+    }
+    delay(10);
+    i++;
+    //delay(15); 
+  }
+   
+  GPSAnalyzer32(infoLocation);
+
+   
+
+  //Send collected data to mysql server 
+  SendGPSLocation();
 }
 
 
@@ -270,8 +307,12 @@ void PrintSecondsElapsed(){
  ******************************************************************************************/
 
 void SendGPSLocation(){  
-  //char data2db[]="410.869,111.222";
-  char data2db[21]="0000.0000,00000.0000";
+  //char latitude[10]="0000.0000";
+  //char longitude[11]="00000.00000";
+  //char MSL_altitude[8]="00000.0";
+  //char Speed[8]="000.000";
+  //char data2db[21]="0000.0000,00000.0000";  //"latitude,longitude"
+  char data2db[36]="0000.0000,00000.0000,00000.0,000.000"; //"latitude,longitude,MSL_altitude,Speed"
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
@@ -307,6 +348,17 @@ void SendGPSLocation(){
   strncpy(data2db,latitude,sizeof(latitude));
   strcat(data2db,",");
   strcat(data2db,longitude);
+
+  strcat(data2db,",");
+  strcat(data2db,MSL_altitude);
+
+  strcat(data2db,",");
+  strcat(data2db,Speed);
+
+  Serial.println("valor de data2db: ");
+  Serial.println(data2db);
+  
+  
   
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
     Serial.println("CIPSEND => FAIL");
@@ -346,6 +398,8 @@ void SendGPSLocation(){
  *************************************************************************************/
 boolean SendCIPSTART (Protocol ptl)
 {
+  //char bufferC[30];
+  
   if(ptl == TCP) {
     if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
       return false;    
@@ -359,7 +413,15 @@ boolean SendCIPSTART (Protocol ptl)
       if(!sim808_check_with_cmd("AT+CIPSTART=\"UDP\",\"ardugps.hopto.org\",6789\r\n","ERROR\r\n\r\nALREADY CONNECT\r\n",CMD)){  
         return false;    
       }
-      else {        
+      else { 
+        
+        //void sim808_read_buffer(char *buffer, int count, unsigned int timeout, unsigned int chartimeout)
+        /*sim808_send_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n");
+        sim808_read_buffer(bufferC,30,5,500);
+        Serial.println("Result of CDNSGIP");
+        Serial.println(bufferC);*/
+  
+               
         return true;
       }
     } 
@@ -367,7 +429,10 @@ boolean SendCIPSTART (Protocol ptl)
       return false;
     }
   }
+
+
 }
+
 
 
 /*************************************************************************************
@@ -393,7 +458,7 @@ if(len > 0){
   delay(1000);
   sim808_send_End_Mark();
   if(!sim808_wait_for_resp("SEND OK\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
-      return 0;
+    return 0;
   }        
 }
 return len;
@@ -415,10 +480,11 @@ bool CheckConnectionStatus(void)
   }
 }
 
+
 /********************************************************************************
  * boolean GPSAnalyzer(char *gpsBuffer)
  * Analyze the Serial information received after request the information 
- * AT+CCPSINF=2
+ * AT+CCPSINF=0
  * +CGPSINF: 2,050656.000,0030.2706,N,00120.1007,E,1,9,0.90,51.9,M,7.0,M,,
  * AT+CGPSINF=2, get GPS location with format
  * Message ID       = 2
@@ -434,8 +500,7 @@ bool CheckConnectionStatus(void)
  * Units            = M
  * Geoid Separation = xxx
  * Units            = M
- * +CGPSINF: 2,050656.000,0030.2706,N,00120.1007,E,1,9,0.90,51.9,M,7.0,M,,
- ********************************************************************************/
+  ********************************************************************************/
 boolean GPSAnalyzer(char *gpsBuffer) {
    char *token;
 
@@ -510,11 +575,133 @@ boolean GPSAnalyzer(char *gpsBuffer) {
       east_west[sizeof(east_west)-1] = '\0';      
       Serial.print("E/W INDICATOR   : ");
       Serial.println(east_west);    
-      Serial.println("************************************************************ ");  
+      //Serial.println("************************************************************ ");  
         
-   }else return false; 
+   }else return false;
+
+
+   //Skip Position Fix Indicator
+   token = strtok(NULL, ",");
+   if(token == NULL) {
+      return false;
+   }
+
+   //Skip Satellites Used
+   token = strtok(NULL, ",");
+   if(token == NULL) {
+      return false;
+   }
+
+   //Skip HDOP
+   token = strtok(NULL, ",");
+   if(token == NULL) {
+      return false;
+   }
+
+   //Get MSL Altitude
+   token = strtok(NULL, ",");
+   if(token != NULL) {
+      strncpy(MSL_altitude,token,sizeof(MSL_altitude));
+      MSL_altitude[sizeof(MSL_altitude)-1] = '\0';      
+      Serial.print("MSL altitude   : ");
+      Serial.println(MSL_altitude);    
+      //Serial.println("************************************************************ ");  
+        
+   }else return false;
 
    return true;     
-}  
+}
+
+/********************************************************************************
+* GPSAnalyzer32(infoLocation);
+* GPRMC
+* AT+CGPSINF=32
+* +CGPSINF: 32,032432.000,A,3016.2261,N,12006.0382,E,0.185,116.11,131017,,,A
+* Message ID          : $GPRMC = 32 (RMC protocol header)
+* UTC Time            : hhmmss.sss
+* Status              : A = data valid or V = data not valid
+* Latitude            : ddmm.mmmmmm
+* N/S Indicator       : N/S
+* Longitude           : dddmm.mmmmmm
+* E/W Indicator       : E/W
+* Speed Over Ground   : knots
+* Course Over Ground  : degrees (TRUE)
+* Date                : ddmmyy
+* Magnetic Variation  : degrees (E/W)
+* East/West Indicator : E/W
+* Mode                : A = Autonomous
+*                       D = DGPS
+*                       E = DR
+*                       N = Output Data Not Valid
+*                       R = Coarse Position
+********************************************************************************/
+boolean GPSAnalyzer32(char *gpsBuffer) {
+   char *token;
+   byte i=0;
+   float Speedkmh;
+   /* get the first token */
+   //Serial.println("****************Content of gpsBuffer*******************");
+   //Serial.println("valor do buffer :");
+   //Serial.println(gpsBuffer);
+   
+   //Get Command sent
+   token = strtok(gpsBuffer,"\n\r" );
+   if(token == NULL)  return false;
+
+   //Get "+CGPSINF:" string
+   token = strtok(NULL, ":");   
+   if(token == NULL)  return false;
+   
+   //Get CGPSINF value
+   token = strtok(NULL, ",");
+   
+   while (i<8) {     
+     if((token != NULL) && (i==7)){
+       strncpy(Speed,token,sizeof(Speed)); //Speed in Knot
+       Speed[sizeof(Speed)-1] = '\0';     
+       Serial.print("SPEED  KNOT      : ");
+       Serial.println(Speed);             
+       
+       Speedkmh = atof(Speed);
+       Speedkmh = Speedkmh*1.852;
+       dtostrf(Speedkmh,3,3,Speed);   
+
+       Serial.print("SPEED  KMH       : ");
+       Serial.println(Speed);             
+       
+       return true;
+     }else {
+       if (token == NULL){
+         return false;
+       }else{
+        token = strtok(NULL, ",");
+        i++;       
+       }
+     }    
+   }  
+}
+
+
+
+
+/********************************************************************************
+* GPVTG
+* AT+CGPSINF=64
+* +CGPSINF: 64,299.79,T,,M,0.072,N,0.133,K,A
+* Message ID    : $CPVTG = 64
+* Course        : degrees
+* Reference     : TRUE
+* Course        : degrees (Measured heading)
+* Reference     : M (Magnetc)
+* Speed         : knots (Measured horizontal speed)
+* Units         : N (Knots)
+* Speed         : Km/h (Measured horizontal speed)
+* Units         : Kilometers/h
+* Mode          : A = Autonomous
+*                 D = DGPS
+*                 E = DR
+*                 N = Output Data Not Valid
+*                 R = Coarse Position
+********************************************************************************/
 
 
