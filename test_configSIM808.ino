@@ -7,7 +7,24 @@
   static int const prot = 1;          // default value TCP
 #endif
 
-//#include <DFRobot_sim808.h>
+
+//The content of messages sent
+//#define MESSAGE  "hello,world"
+#define PHONE_NUMBER "18968192062"
+#define MESSAGE_LENGTH 30
+//#define MESSAGE_LENGTH 160
+char message[MESSAGE_LENGTH];
+int messageIndex = 0;
+char phone[16];
+char datetime[24];
+
+char gprsBuffer[64];
+char *s = NULL;
+char smsMessage[64];
+
+
+#include <DFRobot_sim808.h>
+
 #include <sim808.h>
 #include <SoftwareSerial.h>
 #include <string.h>
@@ -17,14 +34,16 @@
 
 
 SoftwareSerial GPRS(rxPin, txPin); // RX, TX
-//DFRobot_SIM808 sim808(&GPRS);
+
+DFRobot_SIM808 sim808(&GPRS);
+
 SimpleTimer timer;
 
-enum Protocol {
+/*enum Protocol {  //if enable #include <DFRobot_sim808.h> and DFRobot_SIM808 sim808(&GPRS); disable this enum
     CLOSED = 0,
     TCP    = 1,
     UDP    = 2,
-};
+};*/
 
 
 char* key;
@@ -115,22 +134,34 @@ void setup()
   //set the data rate of gprs
   //GPRS.println("AT+IPR=9600");
   if(!sim808_check_with_cmd("AT+IPR=9600\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+IPR=9600 => FAIL");    
-  }else Serial.println("AT+IPR=9600 => OK");
+    delay(1);
+    //Serial.println("AT+IPR=9600 => FAIL");    
+  }else {
+    delay(1);
+    //Serial.println("AT+IPR=9600 => OK");
+  }
   delay(50);
   
   //Set the APN id to connect to gprs network
   //GPRS.println("AT+CSTT=\"UNINET\"");
-  if(!sim808_check_with_cmd("AT+CSTT=\"UNINET\"\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+IPR => FAIL");    
-  }else Serial.println("AT+IPR => OK");
+  if(!sim808_check_with_cmd("AT+CSTT=\"UNINET\"\r\n","OK\r\n",CMD)){ 
+    delay(1); 
+    //Serial.println("AT+IPR => FAIL");    
+  }else{ 
+    delay(1);
+    //Serial.println("AT+IPR => OK");
+  }
   delay(50);
     
   //bring up the wireless connection
   //GPRS.println("AT+CIICR");
   if(!sim808_check_with_cmd("AT+CIICR\r\n","OK\r\n",CMD)){  
+    delay(1);
     Serial.println("AT+CIICR => FAIL");    
-  }else Serial.println("AT+CIICR => OK");
+  }else{ 
+    delay(1);
+    //Serial.println("AT+CIICR => OK");
+  }
   delay(50);
     
   //get the local ip number
@@ -141,8 +172,12 @@ void setup()
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
   if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+CDNSGIP => FAIL");    
-  }else Serial.println("AT+CDNSGIP => OK");  
+    delay(1);
+    //Serial.println("AT+CDNSGIP => FAIL");    
+  }else {
+    delay(1);
+    //Serial.println("AT+CDNSGIP => OK");  
+  }
   delay(50);
  
   //GPS configuration
@@ -157,7 +192,29 @@ void setup()
   GPRS.println("AT+CGPSSTATUS?");
   // SerialSim808_Read();
   delay(50);
+  
 
+  //PARAM FOR SMS AND RECEIVE CALL
+  if(!sim808_check_with_cmd("AT+CMGF=1\r\n","OK\r\n",CMD)){ //Set SMS for text mode not HEX when read it
+    Serial.println("fail CMGF");     
+  }else {
+    Serial.println("ok CMGF");
+  }
+  delay(25);
+  
+  if(!sim808_check_with_cmd("AT+CMGDA=\"DEL ALL\"\r\n","OK\r\n",CMD)){ //delete all SMS
+    Serial.println("fail del SMS");     
+  }else {
+    Serial.println("ok del SMS");
+  }
+  delay(25);
+
+  if(!sim808_check_with_cmd("AT+CLIP=1\r\n","OK\r\n",CMD)){ //HABILITAR O CLIP
+    Serial.println("fail CLIP");     
+  }else {
+    Serial.println("ok CLIP");
+  }
+  delay(25);
   
   timer.setInterval(60000, GetGPSLocation);
   //timer.setInterval(1000, PrintSecondsElapsed);
@@ -181,6 +238,178 @@ void loop()
    if(Serial.available())
       GPRS.write(Serial.read());
   #endif
+  
+
+  //Handling of make and receive call
+  if(sim808.readable()){
+    sim808_read_buffer(gprsBuffer,32,DEFAULT_TIMEOUT);
+    Serial.print(gprsBuffer);
+  
+    //**** Detect the current state of the telephone or SMS ****************
+    if(NULL != strstr(gprsBuffer,"RING")) {
+        sim808.answer(); 
+        if(extractCallingNumber(gprsBuffer)){
+          sim808.sendSMS(phone,smsMessage);
+        }else{
+          Serial.println("No CLIP to send SMS");
+        }
+        
+        //sim808_send_cmd("AT+CTTS=2,\"hello,欢迎使用语音合系统\"\r\n");  
+        //sim808.sendSMS(PHONE_NUMBER,smsMessage);
+    
+    }else{
+      if(NULL != (s = strstr(gprsBuffer,"+CMTI: \"SM\""))) { //SMS: $$+CMTI: "SM",24$$
+        sim808_clean_buffer(gprsBuffer,32); 
+
+        if(!sim808_check_with_cmd("AT+CMGF=1\r\n","OK\r\n",CMD)){ //Set SMS for text mode not HEX when read it
+          Serial.println("fail CMGF");     
+        }else {
+          Serial.println("ok CMGF");
+        }
+        delay(25);
+   
+        GPRS.println("AT+CMGR=1");
+        sim808_read_buffer(gprsBuffer,64,DEFAULT_TIMEOUT);
+        Serial.print(gprsBuffer);
+
+        if(!sim808_check_with_cmd("AT+CMGDA=\"DEL ALL\"\r\n","OK\r\n",CMD)){ //delete all SMS
+          Serial.println("fail del SMS");     
+        }else {
+          Serial.println("ok del SMS");
+        }
+
+        
+        if(extractCallingNumberSMS(gprsBuffer)){
+          sim808.sendSMS(phone,smsMessage);
+        }else{
+          Serial.println("No valid # for SMS");
+        }
+      }
+     
+    }
+    sim808_clean_buffer(gprsBuffer,32);       
+  }  
+
+
+}
+
+/****************************************************************************************
+* extractCallingNumber(char *messages)
+* This function when an incoming call come and CLIP is enabled, it will prompt at serial
+* the message:
+*   RING
+*   
+*   +CLIP: "18968192062",161,"",0,"",0
+* 
+* Here we extract the phone number
+*****************************************************************************************/
+boolean extractCallingNumber(char *inMessage){
+char *token;
+
+   /* get the first token */
+   //Serial.println("valor do buffer :");
+   Serial.println(inMessage);
+
+   if(NULL == strstr(inMessage,"+CLIP")){
+     return false;
+   }
+   
+   //Get Command sent
+   token = strtok(inMessage,"\n\r" );
+   if(token == NULL)  return false;
+
+   //Get "+CLIP: " string
+   token = strtok(NULL, "\"");   
+   if(token == NULL)  return false;
+   
+   //Get phone number value
+   token = strtok(NULL, "\"");
+   if(token != NULL) {    
+      strncpy(phone,token,sizeof(phone));
+      phone[sizeof(phone)-1] = '\0';
+
+      //strcpy(gpsMode,token);
+      Serial.print("phone    : ");
+      Serial.println(phone);   
+   }else return false;
+   
+   return true;
+  
+}
+
+/****************************************************************************************
+* extractCallingNumberSMS(char *messages)
+* This function when receive an SMS extract the calling number from SMS.
+* AT+CMGR=#           //read the message # 
+* 
+* +CMGR: "REC READ","18968192062","","17/10/14,14:07:10+32"* 
+* 
+* Here we extract the phone number
+*****************************************************************************************/
+boolean extractCallingNumberSMS(char *inMessage){
+char *token;
+char temp[16];
+
+
+
+   /* get the first token */
+   //Serial.println("valor do buffer :");
+   Serial.println(inMessage);
+
+   if(NULL == strstr(inMessage,"+CMGR")){
+     return false;
+   }
+   
+   //Get Command sent
+   token = strtok(inMessage,"\n\r" );
+   if(token == NULL)  return false;
+
+   //Get "+CMGR:" string
+   token = strtok(NULL, ":");   
+   if(token == NULL)  return false;
+
+   //Get type of SMS "REC READ" or other type not important here 
+   token = strtok(NULL, ",");   
+   if(token == NULL)  return false;
+
+
+   
+   //Get phone number value
+   token = strtok(NULL, ",");
+   if(token != NULL) {    
+      //removing the " at begining and end of phone number
+      //token = phone;
+      token++;
+      token[strlen(token)-1]='\0'; //now the " is not at beginning/end of toke and in phone either
+      
+      strncpy(phone,token,sizeof(phone));
+      phone[sizeof(phone)-1] = '\0';
+
+      //getAllButFirstAndLast(token,phone);
+
+      
+      //strcpy(gpsMode,token);
+      Serial.print("phone: ");
+      Serial.println(phone);   
+   }else return false;
+   
+   return true;
+ 
+}
+
+/*************************************************************************************************
+*  getAllButFirstAndLast(const char *input, char *output)
+*  Ths procedure remove the first and last character of char array 
+*  "12938484848"
+*  for exemplo for a phone number
+************************************************************************************************/
+void getAllButFirstAndLast(const char *input, char *output)
+{
+  int len = strlen(input);
+  if(len > 0)
+    strcpy(output, ++input);
+  if(len > 1)
+    output[len - 2] = '\0';
 }
 
 
@@ -257,7 +486,7 @@ int i = 0;
   delay(50);
    
 
-  posBuf=0;
+/*  posBuf=0;
   i=0;
   //for(int i=0;i<7;i++){
   while((posBuf<=99)&&(i<15)){ 
@@ -267,14 +496,17 @@ int i = 0;
     delay(10);
     i++;
     //delay(15); 
-  }
-   
+  }*/
+  
+  sim808_clean_buffer(infoLocation,sizeof(infoLocation));
+  sim808_read_buffer(infoLocation,sizeof(infoLocation),DEFAULT_TIMEOUT,DEFAULT_INTERCHAR_TIMEOUT); 
   GPSAnalyzer32(infoLocation);
 
    
 
   //Send collected data to mysql server 
   SendGPSLocation();
+  createSMSMessage(smsMessage,latitude, longitude, MSL_altitude, Speed);
 }
 
 
@@ -293,8 +525,9 @@ int i = 0;
 }//BASICALLY TO RESET THE BUFFER*/
 
 void PrintSecondsElapsed(){
-  Serial.print("******************Seconds : ");
-  Serial.println(seconds);
+  Serial.print("*");
+  //Serial.print("*Seconds: ");
+  //Serial.println(seconds);
   seconds++;
 } 
 
@@ -321,9 +554,14 @@ void SendGPSLocation(){
   //Get the remote IP address
   //GPRS.println("AT+CDNSGIP=\"ardugps.hopto.org\"");
   if(!sim808_check_with_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n","OK\r\n",CMD)){  
-    Serial.println("AT+CDNSGIP => FAIL");    
-  }else Serial.println("AT+CDNSGIP => OK");  
-  delay(1000);
+    delay(1);
+    //Serial.println("AT+CDNSGIP => FAIL");    
+  }else {
+    delay(1);
+    //Serial.println("AT+CDNSGIP => OK");  
+  }
+  //delay(1000);
+  delay(100);
   
   //start a connection to TCP to URL and port 
   /*if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
@@ -333,15 +571,24 @@ void SendGPSLocation(){
 
   if (prot == TCP){
     if(!SendCIPSTART(TCP)){
-      Serial.println("AT+CIPSTART => FAIL"); 
-    } else Serial.println("AT+CIPSTART => OK");
+      delay(1);
+      //Serial.println("AT+CIPSTART => FAIL"); 
+    } else {
+      delay(1);
+      //Serial.println("AT+CIPSTART => OK");
+    }
   }else {
     if(!SendCIPSTART(UDP)){
-      Serial.println("AT+CIPSTART => FAIL"); 
-    } else Serial.println("AT+CIPSTART => OK");    
+      delay(1);
+      //Serial.println("AT+CIPSTART => FAIL"); 
+    } else {
+      delay(1);
+      //Serial.println("AT+CIPSTART => OK");    
+    }
   }
   
-  delay(1000);
+  //delay(1000);
+  delay(100);
 
   //copy latitude and longitude to send via TCP server
   memset(data2db,'\0',sizeof(data2db));
@@ -355,13 +602,13 @@ void SendGPSLocation(){
   strcat(data2db,",");
   strcat(data2db,Speed);
 
-  Serial.println("valor de data2db: ");
-  Serial.println(data2db);
+  //Serial.println("valor de data2db: ");
+  //Serial.println(data2db);
   
   
   
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-    Serial.println("CIPSEND => FAIL");
+    //Serial.println("CIPSEND => FAIL");
     //Try to resend    
     /*if(!sim808_check_with_cmd("AT+CIPSTART=\"TCP\",\"ardugps.hopto.org\",6789\r\n","OK\r\n",CMD)){  
       Serial.println("AT+CIPSTART => FAIL");    
@@ -369,25 +616,37 @@ void SendGPSLocation(){
 
     if(prot == TCP){
       if(!SendCIPSTART(TCP)){
-        Serial.println("AT+CIPSTART => FAIL"); 
-      } else Serial.println("AT+CIPSTART => OK");
+        delay(1);
+        //Serial.println("AT+CIPSTART => FAIL"); 
+      } else {
+        delay(1);
+        //Serial.println("AT+CIPSTART => OK");
+      }
   
-      delay(1000);
+      //delay(1000);
+      delay(100);
       if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-      Serial.println("CIPSEND =>RESEND FAIL");
-      delay(50);
-      } else Serial.println("CIPSEND => RESEND OK");
+        //Serial.println("CIPSEND =>RESEND FAIL");
+        delay(50);
+      } else {
+        delay(1);
+        //Serial.println("CIPSEND => RESEND OK");
+      }
     }    
-  } else Serial.println("CIPSEND => OK");
+  } else {
+    delay(1);
+    //Serial.println("CIPSEND => OK");
+  }
 
   delay(50);
 
   if (!CheckConnectionStatus()) {
-    Serial.println("Uno was already disconnected from Server");
+    //Serial.println("Uno was already disconnected from Server");
+    delay(1);
   }
   else{
     sim808_check_with_cmd("AT+CIPCLOSE\r\n", "CLOSE OK\r\n", CMD);
-    Serial.println("Uno have disconnected from Server");
+    //Serial.println("Uno have disconnected from Server");
   }
   //delay(3000);
 
@@ -453,13 +712,15 @@ if(len > 0){
   /*if(0 != sim808_check_with_cmd(str,"SEND OK\r\n", DEFAULT_TIMEOUT * 10 ,DATA)) {
         return 0;
   }*/
-  delay(1000);
+  //delay(1000);
+  delay(100);
   sim808_send_cmd(str);
-  delay(1000);
+  //delay(1000);
+  delay(100);
   sim808_send_End_Mark();
-  if(!sim808_wait_for_resp("SEND OK\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
+/*  if(!sim808_wait_for_resp("SEND OK\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
     return 0;
-  }        
+  }*/
 }
 return len;
 }
@@ -505,7 +766,7 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    char *token;
 
    /* get the first token */
-   Serial.println("****************Content of gpsBuffer*******************");
+   //Serial.println("**Content of gpsBuffer**");
    //Serial.println("valor do buffer :");
    //Serial.println(gpsBuffer);
    
@@ -524,8 +785,8 @@ boolean GPSAnalyzer(char *gpsBuffer) {
       //gpsMode[sizeof(gpsMode)-1] = '\0';
 
       strcpy(gpsMode,token);
-      Serial.print("CGPSINF_MODE    : ");
-      Serial.println(gpsMode);   
+      //Serial.print("CGPSINF_MODE    : ");
+      //Serial.println(gpsMode);   
    }else return false;
 
 
@@ -534,8 +795,8 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    if(token != NULL) {
       strncpy(dateTime,token,sizeof(dateTime));
       dateTime[sizeof(dateTime)-1] = '\0';        
-      Serial.print("TIME            : ");
-      Serial.println(dateTime); 
+      //Serial.print("TIME            : ");
+      //Serial.println(dateTime); 
             
    }else return false;
 
@@ -553,8 +814,8 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    if(token != NULL) {     
       strncpy(north_south,token,sizeof(north_south));
       north_south[sizeof(north_south)-1] = '\0';     
-      Serial.print("N/S INDICATOR  : ");
-      Serial.println(north_south);  
+      //Serial.print("N/S INDICATOR  : ");
+      //Serial.println(north_south);  
          
    }else return false;   
 
@@ -573,8 +834,8 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    if(token != NULL) {
       strncpy(east_west,token,sizeof(east_west));
       east_west[sizeof(east_west)-1] = '\0';      
-      Serial.print("E/W INDICATOR   : ");
-      Serial.println(east_west);    
+      //Serial.print("E/W INDICATOR   : ");
+      //Serial.println(east_west);    
       //Serial.println("************************************************************ ");  
         
    }else return false;
@@ -603,14 +864,38 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    if(token != NULL) {
       strncpy(MSL_altitude,token,sizeof(MSL_altitude));
       MSL_altitude[sizeof(MSL_altitude)-1] = '\0';      
-      Serial.print("MSL altitude   : ");
+      Serial.print("MSL_ALTITUDE   : ");
       Serial.println(MSL_altitude);    
-      //Serial.println("************************************************************ ");  
         
    }else return false;
 
    return true;     
 }
+
+/********************************************************************************
+* createSMSMessage(char *message,char lat, char lng, char alt, char sp)
+* This function format the message to be sent to user
+*********************************************************************************/
+void createSMSMessage(char *message,char *lat, char *lng, char *alt, char *sp)
+{
+  memset(message,'\0',sizeof(message));
+  strncpy(message,"* LAT=",sizeof("Lat.: "));  
+  strcat(message,lat);
+  strcat(message,", ");
+  strcat(message,"LNG=");
+  strcat(message,lng);
+  strcat(message,", ");
+  strcat(message,"ALT=");  
+  strcat(message,alt);
+  strcat(message,"m, ");
+  strcat(message,"SPEED=");
+  strcat(message,sp);  
+  strcat(message,"kmh *");
+  //Serial.println("SMS");
+  Serial.println(message);
+}
+
+
 
 /********************************************************************************
 * GPSAnalyzer32(infoLocation);
@@ -659,8 +944,8 @@ boolean GPSAnalyzer32(char *gpsBuffer) {
      if((token != NULL) && (i==7)){
        strncpy(Speed,token,sizeof(Speed)); //Speed in Knot
        Speed[sizeof(Speed)-1] = '\0';     
-       Serial.print("SPEED  KNOT      : ");
-       Serial.println(Speed);             
+       //Serial.print("SPEED  KNOT      : ");
+       //Serial.println(Speed);             
        
        Speedkmh = atof(Speed);
        Speedkmh = Speedkmh*1.852;
