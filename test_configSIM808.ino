@@ -1,5 +1,5 @@
-//#define DEBUG 1
-#define NO_NETLIGHT 1   //turn on or off netlight of sim808 board
+#define DEBUG 1
+//#define NO_NETLIGHT 1   //turn on or off netlight of sim808 board
 #define PROTOCOL 2   //1 = TCP and 2 = UDP
 
 #ifdef PROTOCOL
@@ -20,6 +20,13 @@
 #define NO_GPRS_SIGNAL 20
 #define DNS_ERROR 21
 #define PDP_DEACT 22
+
+#define NO_GPS_DATA_AVAILABLE 31
+
+#define START_GPRS_TCP_FAIL 50
+#define START_GPRS_UDP_FAIL 51
+#define SEND_TCP_DATA_FAIL 52
+#define SEND_UDP_DATA_FAIL 53
 
 
 //The content of messages sent
@@ -60,8 +67,8 @@ char MSL_altitude[8]="00000.0";
 char Speed[8]="000.000";
 char GEOID[5]="00000";
 boolean DNS_OK = true;
-int currentRadioSig = 0;
-int previousRadioSig = 0;
+int currentRadioSig = 10;   //currentRadioSig/previousRadioSig = 10 to avoid configure again the data connection
+int previousRadioSig = 10;  //when enter the first time of loop to send data
 
 
 //byte pos = 0;  //WHAT POSITION WE ARE AT IN THAT BUFFER
@@ -116,7 +123,7 @@ void setup()
   }*/
   
    /******************************************************
-   * GPS Configuration
+   * GPRS Configuration
    ******************************************************/
   //GNSS power control
   sim808_check_with_cmd("AT+CGNSPWR=1","OK\r\n",CMD); 
@@ -132,22 +139,24 @@ void setup()
 
   //check if mobile number is register in the network
   //GPRS.println("AT+CREG=?");
- 
+
   /*******************************************************
    * configuration of GPRS data 
    *******************************************************/
- InitGPRS();
+  InitGPRS();
 
- /***********************************************************
+  /***********************************************************
   * GPS configuration
   ***********************************************************/
   //GPS configuration
-  GPRS.println("AT+CGPSPWR=1");  //POWER ON of GPS interface
+  //GPRS.println("AT+CGPSPWR=1");  //POWER ON of GPS interface
   //SerialSim808_Read();
+  sim808_check_with_cmd("AT+CGPSPWR=1\r\n","OK\r\n",CMD); 
   delay(50);
   
-  GPRS.println("AT+CGPSRST=1");  //1 = HOT start of GPS or COLD start = 0
+  //GPRS.println("AT+CGPSRST=0");  //1 = HOT start of GPS or COLD start = 0
   //SerialSim808_Read();
+  sim808_check_with_cmd("AT+CGPSRST=0\r\n","OK\r\n",CMD);
   delay(50);
   
 //  GPRS.println("AT+CGPSSTATUS?");
@@ -179,8 +188,14 @@ void setup()
   #ifdef NO_NETLIGHT
     sim808_send_cmd("AT+CNETLIGHT=0\r\n");
   #endif  
+
+  //wait 
+  wait_GPS_connect(240);  //wait GPS connect 2minutes
+
   
-  timer.setInterval(60000, GetGPSLocation);
+  GetGPSLocation();
+  
+  timer.setInterval(60000, GetGPSLocation); //call subroutine to GetGPSLocation every minute
   //timer.setInterval(1000, PrintSecondsElapsed);
 }
 
@@ -205,31 +220,31 @@ void loop()
   
 
   
-  //Receiving call 
-  if(sim808.readable()){
-    sim808_read_buffer(gprsBuffer,32,DEFAULT_TIMEOUT);
-    //Serial.print("LoopBuf:");
-    //Serial.println(gprsBuffer);
-  
-    //**** Detect the current state of the telephone or SMS ****************
-    if(NULL != strstr(gprsBuffer,"RING")) {
-        sim808.answer(); 
-        createSMSMessage(smsMessage,latitude, longitude, MSL_altitude, Speed);
-        if(extractCallingNumber(gprsBuffer)){
-          sim808.sendSMS(phone,smsMessage);
-        }else{
-          //Serial.println("No CLIP to send SMS");
-        }
-        delay(2000);
-        sim808_send_cmd("AT+CTTS=2,\"hello,欢迎使用语音合系统\"\r\n");            
-  }
-
-  //check if GPRS signal still good
-  if(NULL != (s = strstr(gprsBuffer,"CDNSGIP: 0,8"))) {
-    Serial.println("No signal or DNS fault loop");
-    DNS_OK = false; 
-  }        
-  
+//  //Receiving call 
+//  if(sim808.readable()){
+//    sim808_read_buffer(gprsBuffer,32,DEFAULT_TIMEOUT);
+//    //Serial.print("LoopBuf:");
+//    //Serial.println(gprsBuffer);
+//  
+//    //**** Detect the current state of the telephone or SMS ****************
+//    if(NULL != strstr(gprsBuffer,"RING")) {
+//        sim808.answer(); 
+//        createSMSMessage(smsMessage,latitude, longitude, MSL_altitude, Speed);
+//        if(extractCallingNumber(gprsBuffer)){
+//          sim808.sendSMS(phone,smsMessage);
+//        }else{
+//          //Serial.println("No CLIP to send SMS");
+//        }
+//        delay(2000);
+//        sim808_send_cmd("AT+CTTS=2,\"hello,欢迎使用语音合系统\"\r\n");            
+//  }
+//
+//  //check if GPRS signal still good
+//  if(NULL != (s = strstr(gprsBuffer,"CDNSGIP: 0,8"))) {
+//    Serial.println("No signal or DNS fault loop");
+//    DNS_OK = false; 
+//  }        
+//  
 
   //Receive SMS message   
 //  if(NULL != (s = strstr(gprsBuffer,"+CMTI: \"SM\""))) { //SMS: $$+CMTI: "SM",24$$
@@ -262,8 +277,8 @@ void loop()
 
 
     
-    sim808_clean_buffer(gprsBuffer,32);       
-  }  
+//    sim808_clean_buffer(gprsBuffer,32);       
+//  }  
 
 
 }
@@ -511,67 +526,126 @@ void power(void)
  * This function request the GPS information from SIM808, parse information in global 
  * variables and finally print the information at Serial interface for debugging.
  ****************************************************************************************/
-void GetGPSLocation(){
+int GetGPSLocation(){
 char infoLocation[BUFFER_SIZE];  
 posBuf=0;
 int i = 0;
+int j=0;
 
-  //Get position
-  while(GPRS.available()){
-    GPRS.read();
-  } 
-  GPRS.println("AT+CGPSINF=2");
-   
-  //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
-  //otherwise it may lose some bytes 
-  //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
-  delay(50);
-   
+//  //waking up GPS after sleep
+  sim808_check_with_cmd("AT+CGPSPWR=1\r\n","OK\r\n",CMD); 
+  delay(1000);
+  sim808_check_with_cmd("AT+CGPSRST=1\r\n","OK\r\n",CMD); 
+  delay(1000);
 
-  //for(int i=0;i<7;i++){
-  while((posBuf<=99)&&(i<15)){ 
-    while((GPRS.available()>0)){
-      infoLocation[posBuf++]=GPRS.read();
-    }
-    delay(10);
-    i++;
-    //delay(15); 
+  if(!wait_GPS_connect(25)){ //timeout of 25 seconds to acquire signal  
+    sim808_check_with_cmd("AT+CGPSPWR=0\r\n","OK\r\n",CMD); 
+    return NO_GPS_DATA_AVAILABLE;
   }
-  GPSAnalyzer(infoLocation);
 
-  //Get Speed of SIM808 from GPS
+
+  sim808_clean_buffer(infoLocation,BUFFER_SIZE);
+  
+  sim808_send_cmd("AT+CGPSINF=2\r\n");
+  delay(50);
+  if(sim808.readable()) {
+    sim808_read_buffer(infoLocation,BUFFER_SIZE,DEFAULT_TIMEOUT);
+  }
+  Serial.println("buffer2:");
+  Serial.println(infoLocation);
+  
+  
+//  while(GPRS.available()){
+//    GPRS.read();
+//  } 
+//  GPRS.println("AT+CGPSINF=2");
+//   
+//  //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
+//  //otherwise it may lose some bytes 
+//  //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
+//  delay(50);
+   
+
+//  //for(int i=0;i<7;i++){
+//  while((posBuf<=99)&&(i<15)){ 
+//    while((GPRS.available()>0)){
+//      infoLocation[posBuf++]=GPRS.read();
+//    }
+//    delay(10);
+//    i++;
+//    //delay(15); 
+//  }
+
+  if(!GPSAnalyzer(infoLocation)){
+    //sim808_clean_buffer(infoLocation,BUFFER_SIZE);
+    sim808_check_with_cmd("AT+CGPSPWR=0\r\n","OK\r\n",CMD);     
+    return NO_GPS_DATA_AVAILABLE;
+  }
+
+
+  //debug until here
+
+
+
+
+  sim808_clean_buffer(infoLocation,BUFFER_SIZE);
+   //Get Speed of SIM808 from GPS
   while(GPRS.available()){
     GPRS.read();
   } 
   GPRS.println("AT+CGPSINF=32");
-   
-  //Read response of SIM808 at Serial Port, Uno buffer all data without other activities
-  //otherwise it may lose some bytes 
-  //after send the command to GPS, it takes about 100ms to all serial information arrives UNO   
   delay(50);
-   
-
-/*  posBuf=0;
-  i=0;
-  //for(int i=0;i<7;i++){
-  while((posBuf<=99)&&(i<15)){ 
-    while((GPRS.available()>0)){
-      infoLocation[posBuf++]=GPRS.read();
-    }
-    delay(10);
-    i++;
-    //delay(15); 
-  }*/
   
-  sim808_clean_buffer(infoLocation,sizeof(infoLocation));
-  sim808_read_buffer(infoLocation,sizeof(infoLocation),DEFAULT_TIMEOUT,DEFAULT_INTERCHAR_TIMEOUT); 
+  sim808_read_buffer(infoLocation,BUFFER_SIZE,DEFAULT_TIMEOUT); 
   GPSAnalyzer32(infoLocation);
 
   //Send collected data to mysql server 
-  SendGPSLocation();
+  Serial.println("SendError:");
+  Serial.println(SendGPSLocation());
   //createSMSMessage(smsMessage,latitude, longitude, MSL_altitude, Speed);
+
+  //put GPS to sleep
+  sim808_check_with_cmd("AT+CGPSPWR=0\r\n","OK\r\n",CMD);     
+  //delay(5000);
+  return 0; //success 
 }
 
+
+/****************************************************************************
+ * wait_GPS_connect(int seconds)
+ * wait GPS acquire signal
+ ****************************************************************************/
+boolean wait_GPS_connect(int timeout){
+  unsigned long timerStart;    
+  timerStart = millis();
+
+  sim808_flush_serial();
+  delay(1000);
+  
+  while (1){
+    sim808_clean_buffer(gprsBuffer,64); 
+    sim808_send_cmd("AT+CGPSSTATUS?\r\n");
+    if(sim808.readable()) {
+      sim808_read_buffer(gprsBuffer,64,DEFAULT_TIMEOUT);
+    }
+
+    Serial.println(gprsBuffer);
+    if(strstr(gprsBuffer,"3D Fix")){
+      sim808_clean_buffer(gprsBuffer,64); 
+      sim808_flush_serial();
+      return true;
+     }
+    if ((unsigned long) (millis() - timerStart) > timeout * 1000UL) {
+      sim808_clean_buffer(gprsBuffer,64); 
+      sim808_flush_serial();
+      return false;
+    }
+
+    delay(10000);
+    //sim808_flush_serial();
+  }
+ }
+ 
 
 /*void resetBuffer() 
 {
@@ -638,49 +712,44 @@ int SendGPSLocation(){
   if(sim808.readable()) {
     sim808_read_buffer(gprsBuffer,64,DEFAULT_TIMEOUT);
     //Serial.print(gprsBuffer);
-    if(currentRadioSig <= 7) {
-         Serial.println("NOGPRSsig");
-         sim808_send_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n");
-         previousRadioSig = currentRadioSig;                
-         return NO_GPRS_SIGNAL;            //error of weak signal or DNS failed                     
-    }else{                                 //radio signal > 7
-      if(previousRadioSig > 7){            //signal still good
-        previousRadioSig = currentRadioSig;                
-      }else {                              //signal recovered
-        error = InitGPRS();
-        previousRadioSig = currentRadioSig;
-        if(error > 0) { //initGPRS failed
-          Serial.print("GPRSfail: ");
-          Serial.println(error);
-          return error;        
-        } 
-          Serial.println("GprsInitOK");       
-      }            
-    }
   }
+  if(currentRadioSig <= 7) {
+       Serial.println("NOGPRSsig");
+       sim808_send_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n");
+       previousRadioSig = currentRadioSig;                
+       return NO_GPRS_SIGNAL;            //error of weak signal or DNS failed                     
+  }else{                                 //radio signal > 7
+    if(previousRadioSig > 7){            //signal still good
+      previousRadioSig = currentRadioSig;                
+    }else {                              //signal recovered
+      error = InitGPRS();
+      previousRadioSig = currentRadioSig;
+      if(error > 0) {                    //initGPRS failed
+        Serial.print("GPRSfail: ");
+        Serial.println(error);
+        return error;        
+      } 
+      Serial.println("GprsInitOK");       
+    }            
+  }
+  
 
     
   //get the local ip number
   //GPRS.println("AT+CIFSR");
-  sim808_send_cmd("AT+CIFSR\r\n");  
+  sim808_send_cmd("AT+CIFSR\r\n");
+  delay(50);  
   sim808_send_cmd("AT+CDNSGIP=\"ardugps.hopto.org\"\r\n");
+  delay(50);
   
   //start a connection to TCP to URL and port 
   if (prot == TCP){
-    if(!SendCIPSTART(TCP)){
-      delay(1);
-      //Serial.println("AT+CIPSTART => FAIL"); 
-    } else {
-      delay(1);
-      //Serial.println("AT+CIPSTART => OK");
-    }
-  }else {
+    if(!SendCIPSTART(TCP)){            //TCP protocol
+      return START_GPRS_TCP_FAIL;      //"AT+CIPSTART => FAIL"; 
+    } 
+  }else {                              //UDP protocol
     if(!SendCIPSTART(UDP)){
-      delay(1);
-      //Serial.println("AT+CIPSTART => FAIL"); 
-    } else {
-      delay(1);
-      //Serial.println("AT+CIPSTART => OK");    
+      return START_GPRS_UDP_FAIL;      //"AT+CIPSTART => FAIL"; 
     }
   }
   
@@ -699,35 +768,27 @@ int SendGPSLocation(){
   strcat(data2db,",");
   strcat(data2db,Speed);
 
-  //Serial.println("valor de data2db: ");
-  //Serial.println(data2db);
+  Serial.println("valor de data2db: ");
+  Serial.println(data2db);
   
   
   
   if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-    if(prot == TCP){
-      if(!SendCIPSTART(TCP)){
-        delay(1);
-        //Serial.println("AT+CIPSTART => FAIL"); 
-      } else {
-        delay(1);
-        //Serial.println("AT+CIPSTART => OK");
-      }
-  
+    if(prot == TCP){                  //TCP protocol
+      if(!SendCIPSTART(TCP)){         //Trying to restart TCP protocol     
+        return START_GPRS_TCP_FAIL;        
+      } 
+
       //delay(1000);
       delay(100);
-      if(!SendDataCIPSEND(data2db,sizeof(data2db))){
-        //Serial.println("CIPSEND =>RESEND FAIL");
-        delay(50);
-      } else {
-        delay(1);
-        //Serial.println("CIPSEND => RESEND OK");
-      }
-    }    
-  } else {
-    delay(1);
-    //Serial.println("CIPSEND => OK");
-  }
+      if(!SendDataCIPSEND(data2db,sizeof(data2db))){    //Trying to resend TCP data
+        return SEND_TCP_DATA_FAIL;                      //"CIPSEND =>RESEND FAIL"        
+      } 
+
+    }else{                             //UDP protocol
+      return SEND_UDP_DATA_FAIL;      
+    }
+  } 
 
   delay(50);
 
@@ -852,11 +913,25 @@ bool CheckConnectionStatus(void)
   ********************************************************************************/
 boolean GPSAnalyzer(char *gpsBuffer) {
    char *token;
+   char *validation;
 
+   validation = gpsBuffer; 
    /* get the first token */
    //Serial.println("**Content of gpsBuffer**");
-   //Serial.println("valor do buffer :");
-   //Serial.println(gpsBuffer);
+
+//   Serial.println("buffer3:");
+//   Serial.println(gpsBuffer);
+
+   
+   if(!strstr(validation,"+CGPSINF: 2")) { //not valid gps data
+     return false; 
+   }
+    
+   if(strstr(validation,"0000.0000,N,00000.0000,E")) { //no lat or lng available
+     return false; 
+   }
+   
+
    
    //Get Command sent
    token = strtok(gpsBuffer,"\n\r" );
@@ -893,8 +968,8 @@ boolean GPSAnalyzer(char *gpsBuffer) {
    if(token != NULL) {
       strncpy(latitude,token,sizeof(latitude));
       latitude[sizeof(latitude)-1] = '\0';      
-      //Serial.print("LATITUDE        : ");
-      //Serial.println(latitude);      
+      Serial.print("LATITUDE        : ");
+      Serial.println(latitude);      
    }else return false;   
 
    //Get North or South
