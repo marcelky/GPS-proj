@@ -41,7 +41,7 @@ enum initTime{
 
 // start reading from the first byte (address 0) of the EEPROM
 int addWrite = 0; //write
-
+int addRead = 0;  //position to read from EEPROM
 
 //The content of messages sent
 //#define MESSAGE  "hello,world"
@@ -102,6 +102,7 @@ char buffer[20];                 // WHAT WE ARE READING INTO
 int posBuf;
 int seconds=0;
 int Powerkey=6;                 //Power pin for SIM808
+int DTRkey=8;                   //pin 8 of arduino will be connected to DTR of SIM808 pin (9)
 
 
 /*******************************************************************************************
@@ -124,7 +125,7 @@ void setup()
   //delay(20000); //test to see if this reduce the drain of current of batery
 
   sim808_check_with_cmd("AT+CPOWD=1","OK\r\n",CMD); 
-  //delay(5000);
+  delay(5000);
   pinMode(Powerkey, OUTPUT);   // initialize the digital pin as an output.  
   power();                     // power on the sim808 or power down the sim808  
 
@@ -142,17 +143,24 @@ void setup()
 /*  if(sim808_wait_for_resp("SMS Ready\r\n", DATA, DEFAULT_TIMEOUT * 10, DEFAULT_INTERCHAR_TIMEOUT * 10)) {
     Serial.println("Call/SMS ready");  
   }*/
+
+   /*****************************************************
+    * Enable charging
+    ****************************************************/
+    //sim808_send_cmd("AT+ECHARGE=1");
+
   
    /******************************************************
    * GPRS Configuration
    ******************************************************/
+  delay(5000);//try to save battery burst
   //GNSS power control
   sim808_check_with_cmd("AT+CGNSPWR=1","OK\r\n",CMD); 
-  //delay(290);
+  delay(5000);
   
   //GNSS navitation, GEO-Fence and speed alarm URC report control
   sim808_check_with_cmd("AT+CGNSURC=0","OK\r\n",CMD); 
-  //delay(300);
+  delay(5000);
 
   //GSM and GPRS configuration
   //check which network GPRS module is connected with 
@@ -197,11 +205,41 @@ void setup()
   ***********************************************************/
   connect_GPS(240, FIRST_TIME);  //wait GPS connect 2minutes
 
-  if(!GPSAnalyzer128()){ 
+  if(!GPSAnalyzer128()){ // Get current time from GPS 
     setCurrentError(INITIAL_TIME_NOT_SET);   
     printAllError();  
+  }else{
+    addWrite = EEPROMReadInt(0);               //position 0 always have the last position to write data
+//    Serial.print("InitAdd: ");
+//    Serial.print(addWrite);
+    if(addWrite==0){
+      addWrite = addWrite + 2;                //Write date starting at position 2  
+    }
+    addWrite = storeString(addWrite,"D");
+    addWrite = storeString(addWrite,startDateTime);
+    EEPROMWriteInt(0,addWrite);
+    Serial.println(startDateTime);
   }
   
+
+/*****************************************************************************************
+ *Configure SIM808 to power save mode, AT+CSCLK. 
+ *It can exit sleep mode  Configure SIM808 
+ * Pull down DTR
+ * Receive voice or data call from network
+ * Receive SMS from network
+ * Receive external interrupt
+ * Charge VBUS pin
+ * AT+CSCLK=0 disable slow clock
+ *          1 enable slow clock controlled by DTR. when DTR=1 can enter sleep mode
+ *                                                 when DTR=0 exit sleep mode
+ *****************************************************************************************/
+  //configure DTR pin to normal HIGH
+  pinMode(DTRkey, OUTPUT);
+  digitalWrite(DTRkey, LOW);      //can not enter sleep mode
+  
+  //sim808_check_with_cmd("AT+CSCLK=1\r\n","OK\r\n",CMD);  //activate the sleep mode
+
   GetGPSLocation();
   
   timerID = timer.setInterval(60000, GetGPSLocation); //call subroutine to GetGPSLocation every minute
@@ -232,7 +270,7 @@ void loop()
 
   if ((readCurrentError(NO_GPRS_SIGNAL))== 1){
     timer.disable(timerID);
-    Serial.println("GetGPSDisabled");
+//    Serial.println("GetGPSDisabled");
     connect_GPS(120, RUNNING_TIME);                        //leave GPS ON/COLD START until timeout of 120 sec
 
     sim808_check_with_cmd("=0\r\AT+CGPSPWRn","OK\r\n",CMD);   //put GPS to sleep either acquire signal or not   
@@ -242,7 +280,7 @@ void loop()
     
     }else{                                                    //if GPRS_SIGNAL OK activate routine of getGPSLocation() again
       timer.enable(timerID);
-      Serial.println("GetGPSEnabled");      
+//      Serial.println("GetGPSEnabled");      
     }
   }
   
@@ -299,12 +337,9 @@ void loop()
 //    }else{
 //      Serial.println("No valid # for SMS");
 //    }
-//  }
-
-
+//  } 
+//  sim808_clean_buffer(gprsBuffer,32);       
     
-//    sim808_clean_buffer(gprsBuffer,32);       
-//  }  
 
 
 }
@@ -457,8 +492,8 @@ char *token;
       phone[sizeof(phone)-1] = '\0';
 
       //strcpy(gpsMode,token);
-      Serial.print("ph#: ");
-      Serial.println(phone);   
+//      Serial.print("ph#: ");
+//      Serial.println(phone);   
    }else return false;
    
    return true;
@@ -517,8 +552,8 @@ char temp[16];
 
       
       //strcpy(gpsMode,token);
-      Serial.print("ph#: ");
-      Serial.println(phone);   
+//      Serial.print("ph#: ");
+//      Serial.println(phone);   
    }else return false;
    
    return true;
@@ -553,6 +588,18 @@ void power(void)
 }
 
 /****************************************************************************************
+ * DTR_low50ms()
+ * Function power on or power of SIM808.
+ ****************************************************************************************/
+void DTR_low50ms(void)
+{
+  digitalWrite(DTRkey, LOW); 
+  delay(50);               // wait for 1 second
+  digitalWrite(DTRkey, HIGH);
+}
+
+
+/****************************************************************************************
  * powerGPS(int onOff)
  * This procedure power on GPS 1, power on and 0 power off.
  ****************************************************************************************/
@@ -575,10 +622,16 @@ char infoLocation[BUFFER_SIZE];
 posBuf=0;
 int i = 0;
 int j=0;
-  Serial.println("***LOOP***");
+
+  digitalWrite(DTRkey, LOW);  //exit sleep mode
+  delay(50);                  //time to exit sleep mode
+  
+  //sim808_send_cmd("AT+CFUN=1\r\n");
+  
+  //Serial.println("*LOOP*");
   //readAllError();  //print all errors present in the previous loop
   
-//  //waking up GPS after sleep
+  //  //waking up GPS after sleep
   //if(!connect_GPS(25, RUNNING_TIME)){ //timeout of 25 seconds to acquire signal, 1h worst case lost 2x
 
   if(!connect_GPS(30, RUNNING_TIME)){ //timeout of 25 seconds to acquire signal, 1h worst case lost 2x  
@@ -626,17 +679,29 @@ int j=0;
 
   //Send collected data to mysql server 
   
+  
+
   currentError = SendGPSLocation();  //error already saved inside the SendGPSLocation()
-  Serial.print("ERROR:");
-  Serial.println(currentError);
+ 
+  //Serial.print("ERROR:");
+  //Serial.println(currentError);
   //createSMSMessage(smsMessage,latitude, longitude, MSL_altitude, Speed);
 
   //put GPS to sleep
-  sim808_check_with_cmd("=0\r\AT+CGPSPWRn","OK\r\n",CMD);     
+  sim808_check_with_cmd("AT+CGPSPWR=0\r\n","OK\r\n",CMD);     
+
+  //test if make difference1
+  sim808_check_with_cmd("AT+CGNSPWR=0\r\n", "OK\r\n", CMD);
+
   //delay(5000);
 
 
   printAllError();                 
+  
+  //sim808_send_cmd("AT+CFUN=4\r\n");
+  Serial.println("DTR high");
+  digitalWrite(DTRkey, HIGH); //can enter sleep mode
+  
   
   return 0; //success 
   
@@ -684,19 +749,34 @@ int j=0;
  ****************************************************************************/
  void printAllError(){
    byte i;
+   boolean first = true;
+   addWrite = EEPROMReadInt(0);               //position 0 always have the last position to write data
+   addWrite=storeString(addWrite,"L");   //store letter 'L' of Loop to indicate init of one loop 
    
-   addWrite=storeString(addWrite,"L:");   //store letter 'L' of Loop to indicate init of one loop 
    
-   Serial.println("ErrorList");
+   Serial.print("Alarm: ");
    for (i=1; i<ERROR_SIZE;i++){ //skipp the position 0 where only indicate there is fault no indication where
-    if(errorStatus[i]==1){
-      Serial.print(i);
-      Serial.print("==>");
-      Serial.println(errorStatus[i]);
-      //store EEPROM start write on address zero
-      addWrite=storeData(addWrite,i);
-    }
+     if(errorStatus[i]==1){
+       if(first){
+         first=false;
+       }else{
+         Serial.print(",");
+         addWrite=storeString(addWrite,",");       
+       }
+       Serial.print(i);
+       addWrite=storeData(addWrite,i);       
+     }
    }
+   Serial.println();
+   Serial.println();
+   
+   addWrite=storeString(addWrite,"S");   //store letter 'S' GPRS signal to indicate level of signal 0-99
+   addWrite=EEPROMWriteInt(addWrite,currentRadioSig); 
+
+   addWrite=storeString(addWrite,"G");              //store letter 'G' to indicate time to acquire signal from GPS after cold/hot start
+   addWrite=EEPROMWriteInt(addWrite,timeGetGPS); 
+   
+   EEPROMWriteInt(0,addWrite);          //Write last position of memory to write    
  }
  
 ///****************************************************************************
@@ -726,8 +806,13 @@ boolean connect_GPS(int timeout, enum initTime t){
   timerStart = millis();
 
   //sim808_flush_serial(); //test
-  Serial.println("WaitGPSsync");
+  Serial.print("GPSsync: ");
   sim808_check_with_cmd("AT\r\n","OK\r\n",CMD);
+
+  //test if make difference2
+  sim808_check_with_cmd("AT+CGNSPWR=1\r\n", "OK\r\n", CMD);
+  delay(1000);
+  
   
   if(!sim808_check_with_cmd("AT+CGPSPWR=1\r\n","OK\r\n",CMD)){
     setCurrentError(POWER_GPS_FAIL); 
@@ -771,10 +856,10 @@ boolean connect_GPS(int timeout, enum initTime t){
       //sim808_flush_serial();
       clearCurrentError(NO_GPRS_SIGNAL);
 
-     Serial.print("GPSsync: ");
+     //Serial.print("GPSsync: ");
      timeGetGPS = ((unsigned long) (millis() - timerStart))/1000UL;
      Serial.println(timeGetGPS);
-     Serial.println((unsigned long) (millis() - timerStart));
+     //Serial.println((unsigned long) (millis() - timerStart));
       
       return true;
      }
@@ -806,7 +891,7 @@ boolean connect_GPS(int timeout, enum initTime t){
 }//BASICALLY TO RESET THE BUFFER*/
 
 void PrintSecondsElapsed(){
-  Serial.print("*");
+//  Serial.print("*");
   //Serial.print("*Seconds: ");
   //Serial.println(seconds);
   seconds++;
@@ -827,12 +912,15 @@ void PrintSecondsElapsed(){
 int SendGPSLocation(){  
   char data2db[36]="0000.0000,00000.0000,00000.0,000.000"; //"latitude,longitude,MSL_altitude,Speed"
   byte error;
-  int signalStrenght;
+  
   /************************************************************
    * CIPSTATUS result
    * 0 IP STATUS    ready to initiate connection
    * 8 CONNECT OK   ready to send data
    ************************************************************/
+  
+
+   
   //get signal strength, if < 7 not possible to send data to server
   sim808_clean_buffer(gprsBuffer,64); 
   sim808_send_cmd("AT+CSQ\r\n");
@@ -873,13 +961,13 @@ int SendGPSLocation(){
       error = InitGPRS(RUNNING_TIME);   //errors already logged with setCurrentError(error) inside this InitGPRS
       previousRadioSig = currentRadioSig;
       if(error > 0) {                    //initGPRS failed
-        Serial.print("GPRSfail: ");
-        Serial.println(error);
+//        Serial.print("GPRSfail: ");
+//        Serial.println(error);
         
         
         return error;        
       } 
-      Serial.println("GprsInitOK");       
+//      Serial.println("GprsInitOK");       
     }            
   }
   
@@ -1377,9 +1465,9 @@ boolean GPSAnalyzer128() {
   
   
    /* get the first token */
-   Serial.println("****************Content of gpsBuffer*******************");
-   Serial.println("valor do buffer :");
-   Serial.println(gprsBuffer);
+//   Serial.println("****************Content of gpsBuffer*******************");
+//   Serial.println("valor do buffer :");
+//   Serial.println(gprsBuffer);
    
    //Get Command sent AT_CGPSINF=128
    token = strtok(gprsBuffer,"\n\r" );
@@ -1431,8 +1519,8 @@ boolean GPSAnalyzer128() {
      return false;
    }  
 
-   Serial.println("startDateTime:");
-   Serial.println(startDateTime);        
+//   Serial.println("startDateTime:");
+//   Serial.println(startDateTime);        
    return true;
 }
 
@@ -1473,8 +1561,8 @@ boolean GPSAnalyzer128() {
 
   addTemp = addTemp + 1;
   if (addTemp == EEPROM.length()) {
-    addTemp = 0;
-  } 
+    addTemp = 2;                    //reserve address 0 and 1 to write last position
+   } 
   return  addTemp;
  }
 
@@ -1497,7 +1585,7 @@ int storeString(int add, char *val){
   addCurr=add;
   addNext = add + size; 
   if (addNext >= EEPROM.length()) { //data do not fit EEPROM
-    addCurr = 0;
+    addCurr = 2;                     //address 0 and 1 is reserved for lastWriteAddress
     addNext = addCurr + size; 
   }
 
@@ -1507,4 +1595,40 @@ int storeString(int add, char *val){
   }
   return addNext;
 }
+
+/******************************************************************************
+ * Routines to write and read integer long 4 bytes max 
+ * 32,767 hold 2^16 bits
+ * Needs 2 bytes
+ * ****************************************************************************/
+ unsigned int EEPROMWriteInt(int p_address, long p_value)
+  {
+  int addNext, addCurr;
+  byte lowByte0 = ((p_value >> 0) & 0xFF);     
+  byte lowByte1 = ((p_value >> 8) & 0xFF);     
+
+  addCurr=p_address;
+  addNext = p_address + 2; 
+  if (addNext >= EEPROM.length()) { //data do not fit EEPROM
+    addCurr = 2;                     //address 0 and 1 is reserved for lastWriteAddress
+    addNext = addCurr + 2; 
+  }
+
+  EEPROM.write(addCurr, lowByte0);
+  EEPROM.write(addCurr + 1, lowByte1);
+
+
+  return addNext;
+  }
+
+/******************************************************************************
+ * Routines to write and read integer long 4 bytes max 
+ * 32,767 hold 2^16 bits
+ * Needs 2 bytes
+ * ****************************************************************************/
+unsigned int EEPROMReadInt(int p_address){
+  byte lowByte0 = EEPROM.read(p_address);
+  byte lowByte1 =  EEPROM.read(p_address + 1);       
+  return ((lowByte0 << 0) & (0xFF)) + ((lowByte1 << 8) & (0xFF00));
+  }
 
